@@ -1,0 +1,23 @@
+---
+title: "pubmed_search_genes"
+author: "Swapna Mahurkar-Joshi"
+date: "July 26, 2017"
+output: html_document
+---
+```{r}
+
+source("http://bioconductor.org/biocLite.R")
+biocLite("XML2R")
+
+library(VarfromPDB)
+```
+
+```{r}
+extract_pubmed(query = "gene", keyword = "stress", localPDB.path = paste(getwd(), "geneExpIBS_pubmed.csv",sep = "/"))
+######### did not work
+
+```
+```{r}
+
+```
+

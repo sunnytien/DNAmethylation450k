@@ -1,0 +1,913 @@
+---
+title: "randomForest_methylation"
+author: "Swapna Mahurkar-Joshi"
+date: "January 19, 2018"
+output:
+word_document: default
+html_document: default
+---
+
+# This is a code for Random forest classification of DNA methylation data. First part is for PBMCs and next for colon. The starting data is list of differntially methylated genes with in each tissue categroy.
+
+```{r setup, include = FALSE}
+# Set working directory outside the chunks
+knitr::opts_knit$set(root.dir = normalizePath("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/randomForestClass/"))
+```
+
+# Install libraries
+
+```{r, include = FALSE}
+
+require(randomForest)
+require(MASS)
+library(caret)
+library(ggplot2)
+library(verification)
+library(ROCR)
+
+```
+
+```{r}
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/data1/consistant_data/pbmc_meth_level4.rda")
+load("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/pbmc/PbmcDxDMPs.rda")
+metDat_p   <- pbmc_meth_level4[["metDat_p"]]
+pbmc_betas <- pbmc_meth_level4[["pbmc_betas"]]
+ann450kSub <- pbmc_meth_level4[["ann450kSub"]]
+```
+
+# The groups are uneven, algorithm  lazily and dumps all the samples in the bigger group; try to make them equal
+
+```{r}
+PbmcDxDMPs_sig <- subset(PbmcDxDMPs, PbmcDxDMPs$pval<0.05)
+betas_PbmcDx <- pbmc_betas[row.names(pbmc_betas) %in% row.names(PbmcDxDMPs_sig),]
+metDat_p1.ibs <- subset(metDat_p, metDat_p$Group==2)
+set.seed(123, "L'Ecuyer")
+ibs <- sample(row.names(metDat_p1.ibs), 40, replace = FALSE, prob = NULL)
+df_pheno <-  metDat_p[row.names(metDat_p)%in%c(ibs,row.names(subset(metDat_p, metDat_p$Group==1))),] # selected ibs and all HCs
+df_dat <-  betas_PbmcDx[,colnames(betas_PbmcDx)%in%row.names(df_pheno)]
+df_dat <-  df_dat[,row.names(df_pheno)]; dim(df_dat)
+
+# split into training and test data sets
+# 66.66% training 33.33% test
+set.seed(123, "L'Ecuyer")
+train_ind = createDataPartition(as.factor(df_pheno$Group), p = 2/3, list = FALSE)
+train1=t(df_dat[,train_ind]); dim(train1)
+test1=t(df_dat[,-train_ind])
+metDat_train <- df_pheno[row.names(df_pheno)%in%row.names(train1),]
+metDat_train <- metDat_train[row.names(train1),]
+all.equal(row.names(metDat_train), row.names(train1))
+table(metDat_train$Group)
+```
+
+```{r, include=FALSE}
+set.seed(123, "L'Ecuyer")
+rf1=randomForest(as.factor(metDat_train$Group) ~ . , data = train1 , importance = TRUE)
+save(rf1, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/randomForestClass/pbmc/randomForest.pbmc1.rda")
+```
+
+
+```{r}
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/randomForestClass/pbmc/randomForest.pbmc1.rda")
+# rf1
+plot(rf1)
+varImpPlot(rf1)
+```
+
+```{r}
+metDat_train$Group1 <- gsub(1,0,as.factor(metDat_train$Group))
+metDat_train$Group1 <- as.factor(gsub(2,1,as.factor(metDat_train$Group1)))
+train1             <- as.data.frame(train1)
+train1$Group1      <- as.factor(metDat_train$Group1)
+# library(AUCRF)
+# aucrf1              <- AUCRF(Group1 ~. , data = train1, ranking= "MDA")
+```
+
+```{r}
+# to.remove<-which(data.frame(rf1$importance)$MeanDecreaseAccuracy<=0); length(to.remove)
+# # to.remove<-c(which(data.frame(rf1$importance)$MeanDecreaseAccuracy==min(data.frame(rf1$importance)$MeanDecreaseAccuracy)))
+# df_dat1 <- df_dat[-to.remove,]; dim(df_dat1) ## rerun the code after removing 50 least important features. 
+
+to.keep <- row.names(data.frame(rf1$importance)[rev(order(data.frame(rf1$importance)$MeanDecreaseAccuracy)),])[1:550]
+df_dat1 <- df_dat[to.keep,]; dim(df_dat1)
+```
+
+```{r}
+set.seed(123, "L'Ecuyer")
+train_ind = createDataPartition(as.factor(df_pheno$Group), p = 2/3, list = FALSE)
+train1=t(df_dat1[,train_ind]); dim(train1)
+test1=t(df_dat1[,-train_ind]); dim(test1)
+metDat_train <- df_pheno[row.names(df_pheno)%in%row.names(train1),]
+metDat_train <- metDat_train[row.names(train1),]
+all.equal(row.names(metDat_train), row.names(train1))
+table(metDat_train$Group)
+```
+
+```{r}
+# library(partykit)
+# rfc <- cforest(Group1 ~. , data = as.data.frame(train1))
+# test1 <- as.data.frame(test1)
+# test1$predictedGr  <- predict(rfc, newdata = test1, type = "response")
+```
+
+```{r}
+set.seed(123, "L'Ecuyer")
+rf2=randomForest(as.factor(metDat_train$Group) ~ . , data = train1 , importance = TRUE)
+rf2
+plot(rf2)
+varImpPlot(rf2)
+```
+
+```{r}
+# Predict
+metDat_test <- df_pheno[row.names(df_pheno)%in%row.names(test1),]
+metDat_test <- metDat_test[row.names(test1),]
+set.seed(123, "L'Ecuyer")
+rf.pred <- predict(rf2, newdata = test1)
+table(observed = as.factor(metDat_test$Group), predicted = rf.pred)
+```
+
+# who were the 5 misclassified subjects
+
+```{r}
+mat1   <- as.data.frame(cbind(metDat_test$Group,rf.pred))
+mat.er <- metDat_test[which(mat1$V1!=mat1$rf.pred),]
+mat.er
+```
+
+# Annotate the most important probes
+
+```{r}
+bioMarkerProbesDx <- PbmcDxDMPs[row.names(PbmcDxDMPs)%in% colnames(train1),]
+write.csv(bioMarkerProbesDx, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/randomForestClass/pbmc/bioMarkerProbesDx550.csv")
+
+goAn <- gometh(row.names(bioMarkerProbesDx), all.cpg = NULL, collection = c("GO","KEGG"), array.type = c("450K","EPIC"), plot.bias = FALSE, prior.prob = TRUE)
+goAn <- goAn[order(goAn$P.DE),]
+```
+
+# ROCR
+
+```{r}
+#prediction using ROCR function
+set.seed(123, "L'Ecuyer")
+rf.pred <- predict(rf2, newdata = test1,type="prob")[,2]
+set.seed(123, "L'Ecuyer")
+rf.pred1 = prediction(rf.pred, as.factor(metDat_test$Group))
+ 
+#performance in terms of true and false positive rates
+set.seed(123, "L'Ecuyer")
+rf.perf1 = performance(rf.pred1,"tpr","fpr")
+```
+
+```{r}
+#plot the curve
+plot(rf.perf1,main="ROC Curve for Random Forest Classifier",col=2,lwd=2,smooth=TRUE);abline(a=0,b=1,lwd=2,lty=2,col="gray")
+# plot(rf.perf1,lwd=3,avg="vertical",spread.estimate="boxplot",add=TRUE)
+#compute area under curve
+auc <- performance(rf.pred1,"auc")
+auc <- unlist(slot(auc, "y.values"))
+minauc<-min(round(auc, digits = 2))
+maxauc<-max(round(auc, digits = 2))
+minauct <- paste(c("min(AUC) = "),minauc,sep="")
+maxauct <- paste(c("max(AUC) = "),maxauc,sep="")
+d <- as.numeric(unlist(slot(rf.pred1,"predictions")))
+a <- as.numeric(gsub("1","0",metDat_test$Group))
+a <- as.numeric(gsub("2","1",a))
+A<- data.frame(a,d)
+names(A)<- c("Group", "p2")
+roc.area(A$Group, A$p2)
+```
+# posisitve and negative predictive values
+```{r}
+library(pROC)
+test1       <- as.data.frame(test1)
+test1$pred1 <- unlist(rf.pred1@predictions)
+test1$Group <- metDat_test$Group
+
+proc1       <- roc(test1$Group, test1$pred1, percent = TRUE, plot = TRUE,smooth=TRUE)
+plot(proc1, col = "blue",smooth=TRUE)
+coords(smooth(proc1), 77, "specificity")
+# Get the sensitivities for all thresholds
+sensitivities <- coords(smooth(proc1),"sensitivity", "thr", "se")
+# Get the best threshold
+coords(smooth(proc1), "b", ret="t")
+
+# Get the best threshold according to different methods
+coords(proc1, "b", ret="t", best.method="youden") # default
+coords(proc1, "b", ret="t", best.method="closest.topleft")
+plot(specificity + sensitivity ~ threshold, t(coords(proc1, seq(0, 1, 0.01))), type = "l")
+
+## Coordinates of the curve ##
+coords(proc1, "best", ret=c("threshold", "specificity", "1-npv"))
+coords(proc1, "local maximas", ret=c("threshold", "sens", "spec", "ppv", "npv"))
+
+allCoords <- t(coords(roc = smooth(proc1), x = "all"))
+```
+
+# Predicting remaining ibs
+
+```{r}
+set.seed(123, "L'Ecuyer")
+train1=t(df_dat1[,train_ind]); dim(train1)
+test1=t(df_dat1[,-train_ind]); dim(test1)
+used <- c(row.names(train1),row.names(test1))
+df_pheno_rem <-  metDat_p[!row.names(metDat_p)%in%used,] # unused IBS
+test2 <-  betas_PbmcDx[,colnames(betas_PbmcDx)%in%row.names(df_pheno_rem)]; dim(test2)
+test2 <-  t(test2[,row.names(df_pheno_rem)]); dim(test2)
+
+# Predict
+metDat_test2 <- df_pheno_rem[row.names(df_pheno_rem)%in%row.names(test2),]; dim(metDat_test2)
+metDat_test2 <- metDat_test2[row.names(test2),]
+set.seed(123, "L'Ecuyer")
+rf.pred2 <- predict(rf2, newdata = test2)
+
+table(observed = as.factor(metDat_test2$Group), predicted = rf.pred2)
+```
+
+# who were the 11 patients that were wrongly predicted to be HCs?
+
+```{r}
+misD <- metDat_p[row.names(metDat_p)%in%names(rf.pred2[which(rf.pred2==1)]),]
+misD$classError <- c (rep("error",11))
+D    <- metDat_p[row.names(metDat_p)%in%names(rf.pred2[which(rf.pred2==2)]),]
+D$classError <- c(rep("NoError",58))
+df1 <- rbind(misD,D)
+
+```
+
+# Classification index
+
+```{r}
+rf.pred4 <- as.data.frame(as.matrix(unlist(rf.pred1@"predictions")))
+
+rf.pred4$Group <- metDat_test$Group
+rf.pred4$Group <- gsub(1,"HC",  rf.pred4$Group )
+rf.pred4$Group <- gsub(2,"IBS", rf.pred4$Group )
+
+ggplot(rf.pred4, aes(x = rf.pred4$Group, y = rf.pred4$V1, fill = rf.pred4$Group)) + geom_boxplot() + xlab("Group") + ylab("Predictions")
+```
+
+# Confirm in the 24 subjects from the pilot run
+
+```{r}
+
+```
+
+# recursive partioning
+
+```{r}
+preProcValues <- preProcess(train1, method = c("center", "scale"))
+rf.pred <- predict(preProcValues, newdata = test1)
+x <- as.data.frame(rf.pred )
+y <- metDat_test$Group
+
+
+ctrl <- rfeControl(functions = lmFuncs,
+                   method = "repeatedcv",
+                   repeats = 5,
+                   verbose = FALSE)
+subsets <- c(1:5, 10, 15)
+
+lmProfile <- rfe(x, y,
+                 sizes = subsets,
+                 rfeControl = ctrl)
+
+lmProfile
+```
+
+
+###############################################################################
+Colon
+###############################################################################
+
+```{r setup, include = FALSE}
+# Set working directory outside the chunks
+knitr::opts_knit$set(root.dir = normalizePath("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/randomForestClass/"))
+```
+
+```{r}
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/data1/consistant_data/colon_meth_level4.rda")
+metDat_c   <- col_meth_level4[["metDat_c"]]
+Col_betas <- col_meth_level4[["col_betas"]]
+ann450kSub <- col_meth_level4[["ann450kSub"]]
+
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/res3_functional_norm/methBioconductorWorkflow/colon/ColDxDMPsAn.rda")
+
+```
+
+```{r}
+ColDxDMPs_sig <- subset(colDxDMPsAn, colDxDMPsAn$pval<0.05)
+betas_ColDx <- Col_betas[row.names(Col_betas) %in% row.names(ColDxDMPs_sig),]
+metDat_c1.ibs <- subset(metDat_c, metDat_c$Group==2)
+
+set.seed(123, "L'Ecuyer")
+ibs <- sample(row.names(metDat_c1.ibs), 40, replace = FALSE, prob = NULL)
+df_pheno <-  metDat_c[row.names(metDat_c)%in%c(ibs,row.names(subset(metDat_c, metDat_c$Group==1))),] # selected ibs and all HCs
+df_dat <-  betas_ColDx[,colnames(betas_ColDx)%in%row.names(df_pheno)]
+df_dat <-  df_dat[,row.names(df_pheno)]; dim(df_dat)
+
+# split into training and test data sets
+# 66.66% training 33.33% test
+set.seed(123, "L'Ecuyer")
+train_ind = createDataPartition(as.factor(df_pheno$Group), p = 2/3, list = FALSE)
+train1=t(df_dat[,train_ind]); dim(train1)
+test1=t(df_dat[,-train_ind])
+metDat_train <- df_pheno[row.names(df_pheno)%in%row.names(train1),]
+metDat_train <- metDat_train[row.names(train1),]
+all.equal(row.names(metDat_train), row.names(train1))
+table(metDat_train$Group)
+trainingData1Col <- list(metDat_train,train1)
+names(trainingData1Col) <- c("metDat_train","train1")
+save(trainingData1Col, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/randomForestClass/colontrainingData1Col.rda")
+```
+
+```{r, include=FALSE}
+# Note: The following code was run outside R studio, in a gui, following these steps to get around memory issues:
+
+# 1. run cmd, cd into the location of R progranm (e.g. C:\Program Files\R\R-3.1.3\bin\x64) 
+# 2. in the command-line, Rgui.exe --max-ppsize=500000
+# 3. new Rgui opens, in the new gui type, options("expressions"=20000)
+
+rf1 <- randomForest(as.factor(metDat_train$Group) ~ . , data = as.matrix(train1), importance = TRUE)
+save(rf1, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/randomForestClass/colon/randomForest.Col1.rda")
+```
+
+
+```{r}
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/randomForestClass/colon/randomForest.Col1.rda")
+
+rf1
+plot(rf1)
+varImpPlot(rf1)
+```
+
+```{r}
+metDat_train$Group1 <- gsub(1,0,as.factor(metDat_train$Group))
+metDat_train$Group1 <- as.factor(gsub(2,1,as.factor(metDat_train$Group1)))
+train1             <- as.data.frame(train1)
+train1$Group1      <- as.factor(metDat_train$Group1)
+# library(AUCRF)
+# aucrf1              <- AUCRF(Group1 ~. , data = train1, ranking= "MDA")
+```
+
+
+```{r}
+# to.remove<-which(data.frame(rf1$importance)$MeanDecreaseAccuracy<=0); length(to.remove)
+# # to.remove<-c(which(data.frame(rf1$importance)$MeanDecreaseAccuracy==min(data.frame(rf1$importance)$MeanDecreaseAccuracy)))
+# df_dat1 <- df_dat[-to.remove,]; dim(df_dat1) ## rerun the code after removing 50 least important features. 
+
+to.keep <- row.names(data.frame(rf1$importance)[rev(order(data.frame(rf1$importance)$MeanDecreaseAccuracy)),])[1:300]
+df_dat1 <- df_dat[to.keep,]; dim(df_dat1)
+```
+
+
+```{r}
+set.seed(123, "L'Ecuyer")
+train_ind = createDataPartition(as.factor(df_pheno$Group), p = 2/3, list = FALSE)
+train1=t(df_dat1[,train_ind]); dim(train1)
+test1=t(df_dat1[,-train_ind]); dim(test1)
+metDat_train <- df_pheno[row.names(df_pheno)%in%row.names(train1),]
+metDat_train <- metDat_train[row.names(train1),]
+all.equal(row.names(metDat_train), row.names(train1))
+table(metDat_train$Group)
+```
+
+```{r}
+# library(partykit)
+# rfc <- cforest(Group1 ~. , data = as.data.frame(train1))
+# test1 <- as.data.frame(test1)
+# test1$predictedGr  <- predict(rfc, newdata = test1, type = "response")
+```
+
+```{r}
+set.seed(123, "L'Ecuyer")
+rf2=randomForest(as.factor(metDat_train$Group) ~ . , data = train1 , importance = TRUE)
+rf2
+plot(rf2)
+varImpPlot(rf2)
+```
+
+```{r}
+# Predict
+metDat_test <- df_pheno[row.names(df_pheno)%in%row.names(test1),]
+metDat_test <- metDat_test[row.names(test1),]
+set.seed(123, "L'Ecuyer")
+rf.pred <- predict(rf2, newdata = test1)
+table(observed = as.factor(metDat_test$Group), predicted = rf.pred)
+```
+
+# who were the 5 misclassified subjects
+
+```{r}
+mat1   <- as.data.frame(cbind(metDat_test$Group,rf.pred))
+mat.er <- metDat_test[which(mat1$V1!=mat1$rf.pred),]
+mat.er
+```
+
+# Annotate the most important probes
+
+```{r}
+bioMarkerProbesDx <- ColDxDMPs[row.names(ColDxDMPs)%in% colnames(train1),]
+write.csv(bioMarkerProbesDx, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/randomForestClass/pbmc/bioMarkerProbesDx550.csv")
+
+goAn <- gometh(row.names(bioMarkerProbesDx), all.cpg = NULL, collection = c("GO","KEGG"), array.type = c("450K","EPIC"), plot.bias = FALSE, prior.prob = TRUE)
+goAn <- goAn[order(goAn$P.DE),]
+```
+
+# ROCR
+
+```{r}
+library(ROCR)
+#prediction is ROCR function
+set.seed(123, "L'Ecuyer")
+rf.pred <- predict(rf2, newdata = test1,type="prob")[,2]
+set.seed(123, "L'Ecuyer")
+rf.pred1 = prediction(rf.pred, as.factor(metDat_test$Group))
+ 
+#performance in terms of true and false positive rates
+set.seed(123, "L'Ecuyer")
+rf.perf1 = performance(rf.pred1,"tpr","fpr")
+```
+
+```{r}
+#plot the curve
+plot(rf.perf1,main="ROC Curve for Random Forest Classifier",col=2,lwd=2);abline(a=0,b=1,lwd=2,lty=2,col="gray")
+# plot(rf.perf1,lwd=3,avg="vertical",spread.estimate="boxplot",add=TRUE)
+ 
+#compute area under curve
+auc <- performance(rf.pred1,"auc")
+auc <- unlist(slot(auc, "y.values"))
+minauc<-min(round(auc, digits = 2))
+maxauc<-max(round(auc, digits = 2))
+minauct <- paste(c("min(AUC) = "),minauc,sep="")
+maxauct <- paste(c("max(AUC) = "),maxauc,sep="")
+d <- as.numeric(unlist(slot(rf.pred1,"predictions")))
+a <- as.numeric(gsub("1","0",metDat_test$Group))
+a <- as.numeric(gsub("2","1",a))
+A<- data.frame(a,d)
+names(A)<- c("Group", "p2")
+roc.area(A$Group, A$p2)
+```
+# posisitve and nbegative predictive values
+```{r}
+install.packages("pROC")
+library(pROC)
+test1       <- as.data.frame(test1)
+test1$pred1 <- unlist(rf.pred1@predictions)
+test1$Group <- metDat_test$Group
+
+
+proc1       <- roc(test1$Group, test1$pred1, percent = TRUE, plot = TRUE)
+plot(proc1, col = "blue")
+coords(smooth(proc1), 80, "specificity")
+# Get the sensitivities for all thresholds
+sensitivities <- coords(proc1, proc1$thresholds, "thr", "se")
+# Get the best threshold
+coords(proc1, "b", ret="t")
+
+
+# Get the best threshold according to different methods
+coords(proc1, "b", ret="t", best.method="youden") # default
+coords(proc1, "b", ret="t", best.method="closest.topleft")
+plot(specificity + sensitivity ~ threshold, t(coords(proc1, seq(0, 1, 0.01))), type = "l")
+
+## Coordinates of the curve ##
+coords(proc1, "best", ret=c("threshold", "specificity", "1-npv"))
+coords(proc1, "local maximas", ret=c("threshold", "sens", "spec", "ppv", "npv"))
+```
+
+# Predicting remaining ibs
+
+```{r}
+set.seed(123, "L'Ecuyer")
+train1=t(df_dat1[,train_ind]); dim(train1)
+test1=t(df_dat1[,-train_ind]); dim(test1)
+used <- c(row.names(train1),row.names(test1))
+df_pheno_rem <-  metDat_p[!row.names(metDat_p)%in%used,] # unused IBS
+test2 <-  betas_ColDx[,colnames(betas_ColDx)%in%row.names(df_pheno_rem)]; dim(test2)
+test2 <-  t(test2[,row.names(df_pheno_rem)]); dim(test2)
+
+# Predict
+metDat_test2 <- df_pheno_rem[row.names(df_pheno_rem)%in%row.names(test2),]; dim(metDat_test2)
+metDat_test2 <- metDat_test2[row.names(test2),]
+set.seed(123, "L'Ecuyer")
+rf.pred2 <- predict(rf2, newdata = test2)
+
+table(observed = as.factor(metDat_test2$Group), predicted = rf.pred2)
+```
+
+# who were the 11 patients that were wrogly predicted to be HCs?
+
+```{r}
+misD <- metDat_p[row.names(metDat_p)%in%names(rf.pred2[which(rf.pred2==1)]),]
+misD$classError <- c (rep("error",11))
+D    <- metDat_p[row.names(metDat_p)%in%names(rf.pred2[which(rf.pred2==2)]),]
+D$classError <- c(rep("NoError",58))
+df1 <- rbind(misD,D)
+
+```
+
+# Classification index
+
+```{r}
+rf.pred4 <- as.data.frame(as.matrix(unlist(rf.pred1@"predictions")))
+
+rf.pred4$Group <- metDat_test$Group
+rf.pred4$Group <- gsub(1,"HC",  rf.pred4$Group )
+rf.pred4$Group <- gsub(2,"IBS", rf.pred4$Group )
+
+ggplot(rf.pred4, aes(x = rf.pred4$Group, y = rf.pred4$V1, color = rf.pred4$Group)) + geom_boxplot() + xlab("Group") + ylab("Predictions")
+
+```
+# Coppola RNAseq gene list
+```{r}
+edgeRp005 <-  read.csv("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/RNASeq_wiley/rnaSeq_wgcna_coppola/rnaSeq_ucla_results/SwapnaJoshi_Wiley/3c_DEA_edgeR_phenotypeWithinGender/Significant_geneList_pLess0.005.csv", row.names = 1)
+```
+# FDR p <0.05
+```{r}
+IBS.M_vs_Norm.M <- subset(edgeRp005,edgeRp005$FDR_IBS.M_vs_Norm.M<0.05); dim(IBS.M_vs_Norm.M)
+IBS.F_vs_Norm.F <- subset(edgeRp005,edgeRp005$FDR_IBS.F_vs_Norm.F<0.05); dim(IBS.F_vs_Norm.F)
+length(intersect(IBS.M_vs_Norm.M$gene_name, IBS.F_vs_Norm.F$gene_name))
+
+IBS.M_vs_IBS.F <- subset(edgeRp005,edgeRp005$FDR_IBS.M_vs_IBS.F<0.05); dim(IBS.M_vs_IBS.F)
+Norm.M_vs_Norm.F <- subset(edgeRp005,edgeRp005$FDR_Norm.M_vs_Norm.F<0.05); dim(Norm.M_vs_Norm.F)
+length(intersect(IBS.M_vs_IBS.F$gene_name, Norm.M_vs_Norm.F$gene_name))
+```
+# FDR p <0.1
+```{r}
+IBS.M_vs_Norm.M <- subset(edgeRp005,edgeRp005$FDR_IBS.M_vs_Norm.M<0.1); dim(IBS.M_vs_Norm.M)
+IBS.F_vs_Norm.F <- subset(edgeRp005,edgeRp005$FDR_IBS.F_vs_Norm.F<0.1); dim(IBS.F_vs_Norm.F)
+length(intersect(IBS.M_vs_Norm.M$gene_name, IBS.F_vs_Norm.F$gene_name))
+
+IBS.M_vs_IBS.F <- subset(edgeRp005,edgeRp005$FDR_IBS.M_vs_IBS.F<0.1); dim(IBS.M_vs_IBS.F)
+Norm.M_vs_Norm.F <- subset(edgeRp005,edgeRp005$FDR_Norm.M_vs_Norm.F<0.1); dim(Norm.M_vs_Norm.F)
+length(intersect(IBS.M_vs_IBS.F$gene_name, Norm.M_vs_Norm.F$gene_name))
+```
+
+# p <0.005
+
+```{r}
+IBS.M_vs_Norm.M <- subset(edgeRp005,edgeRp005$PValue_IBS.M_vs_Norm.M<0.005); dim(IBS.M_vs_Norm.M)
+IBS.F_vs_Norm.F <- subset(edgeRp005,edgeRp005$PValue_IBS.F_vs_Norm.F<0.005); dim(IBS.F_vs_Norm.F)
+length(intersect(IBS.M_vs_Norm.M$gene_name, IBS.F_vs_Norm.F$gene_name))
+
+IBS.M_vs_IBS.F <- subset(edgeRp005,edgeRp005$PValue_IBS.M_vs_IBS.F<0.005); dim(IBS.M_vs_IBS.F)
+Norm.M_vs_Norm.F <- subset(edgeRp005,edgeRp005$PValue_Norm.M_vs_Norm.F<0.005); dim(Norm.M_vs_Norm.F)
+length(intersect(IBS.M_vs_IBS.F$gene_name, Norm.M_vs_Norm.F$gene_name))
+```
+
+####################################################################################
+# Disease controls
+##################################################################################
+
+#   Boxplot for selected GEO samples
+
+```{r}
+library(Biobase)
+library(GEOquery)
+```
+
+```{r}
+ibd_beta <- read.csv("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/randomForestClass/disease_controls/GSE32148_matrix_processed_peripheralBlood_used.csv")
+
+ibd_pheno <- read.csv("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/randomForestClass/disease_controls/phenoGSE32148.csv", row.names = 3)
+row.names(ibd_beta) <- ibd_beta[,1]
+ibd_beta <- ibd_beta[1:485577,]
+ibd_beta1 <- ibd_beta[,seq(2,97,2)]
+ibd_pheno$X.Sample_title <- gsub("blood ","", ibd_pheno$X.Sample_title)
+ibd_pheno$X.Sample_title <- gsub("normal peripheral ","", ibd_pheno$X.Sample_title)
+ibd_pheno$X.Sample_title <- gsub("ulcerative colitis peripheral ","", ibd_pheno$X.Sample_title)
+ibd_pheno$X.Sample_title <- gsub("Crohn's disease peripheral ","", ibd_pheno$X.Sample_title)
+row.names(ibd_pheno) <- paste("X", ibd_pheno[,1],sep = "")
+ibd_pheno$Dx <- as.character(ibd_pheno$Dx)
+ibd_pheno$Age <- substr(ibd_pheno$X.Sample_characteristics_ch1.1,10,11)
+ibd_pheno$Age <- gsub("\\.","",ibd_pheno$Age)
+ibd_pheno$Age <- gsub("N/", NA, ibd_pheno$Age)
+ibd_pheno$Gender <- substr(ibd_pheno$X.Sample_characteristics_ch1, 9,9)
+```
+
+```{r}
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/data1/code_output/analysis2/methylationLevel3quantile.Rda")
+pbmc_betas <- getBeta(pbmc.gset.quantile.fil)[,c(1:145)]
+colnames(pbmc_betas) <- substr(colnames(pbmc_betas),1,5)
+pbmc_betas1 <- pbmc_betas[row.names(pbmc_betas)%in%row.names(ibd_beta1),]
+ibd_beta2   <- ibd_beta1[row.names(ibd_beta1)%in%row.names(pbmc_betas1),]
+ibd_beta2   <- ibd_beta2[row.names(pbmc_betas1),]
+metDat_p.ibs<- subset(pData(pbmc.gset.quantile.fil), pData(pbmc.gset.quantile.fil)$Dx=="IBS")[1:109,]
+row.names(metDat_p.ibs) <- metDat_p.ibs[,5]
+metDat_p.hc <- subset(pData(pbmc.gset.quantile.fil), pData(pbmc.gset.quantile.fil)$Dx=="HC")
+```
+
+```{r}
+metDat_p    <- pData(pbmc.gset.quantile.fil)
+phenoAll <- rbind(cbind(row.names(ibd_pheno),ibd_pheno$Dx,ibd_pheno$Gender, ibd_pheno$Age), cbind(metDat_p$NDP, metDat_p$Dx, metDat_p$Gender, metDat_p$Age))
+row.names(phenoAll) <- phenoAll[,1]
+phenoAll <- phenoAll[,-1]
+colnames(phenoAll) <- c("Dx","Gender","Age")
+phenoAll<- as.data.frame(phenoAll)
+phenoAll$Age <- as.numeric(as.character(phenoAll$Age))
+save(phenoAll, file = "phenoAll.rda")
+```
+
+```{r}
+# select 22 IBS patients that are youngest, and 6 that are 49,43,44,60,76 or any other one to match IBD ages
+ibs.ordl <- metDat_p.ibs[order(metDat_p.ibs$Age),]
+ibs.sel <- ibs.ordl[c(1:22,103,85,87,108,109,105),]
+# select 20 nor; 14 that are youngest, and 6 that are 49,43,44,60,76 or any other one to match IBD ages
+hc.ordl <- metDat_p.hc[order(metDat_p.hc$Age),]
+hc.sel <- hc.ordl[c(1:14,31:36),]
+
+
+ibshc <- rbind(ibs.sel,hc.sel)
+row.names(ibshc) <- substr(row.names(ibshc),1,5)
+ibs_beta <- pbmc_betas1[, colnames(pbmc_betas1) %in% row.names(ibshc)]
+all.equal(row.names(ibs_beta), row.names(ibd_beta2))
+allBeta <- cbind(ibs_beta,ibd_beta2)
+allPheno <- rbind(cbind(row.names(ibshc), rep("A",48)),cbind(row.names(ibd_pheno), rep("B",48)))
+colnames(allPheno) <- c("sample_id","batch_id")
+# allPheno <- as.data.frame(allPheno)
+allBeta <- allBeta[,allPheno[,1]]
+all.equal(allPheno[,1], colnames(allBeta))
+save(allPheno, allBeta, file = "selIBS_allDat_beclear.Rda")
+```
+
+```{r}
+library(minfi)
+library(BEclear)
+result1 <- correctBatchEffect(allBeta, allPheno,parallel=TRUE, adjusted=TRUE,method="fdr")
+save(result1, file = "BEclear_results.rda")
+```
+
+# step by step
+
+```{r}
+allBeta <- na.omit(allBeta)
+allPheno <- as.data.frame(allPheno)
+pvals <- calcPvalues(allBeta, allPheno, adjusted=TRUE, method="fdr",parallel=TRUE)
+
+save(pvals, file = "pvals.rda")
+mdifs <- calcMedians(allBeta, allPheno, parallel=TRUE)
+save(mdifs, file = "mdifs.rda")
+summary2 <- calcSummary(medians=mdifs, pvalues=pvals)
+save(summary2, file = "summary2.rda")
+score <- calcScore(allBeta, allPheno, summary2, dir=getwd())
+save(score, file = "score.rda")
+cleared.data <- clearBEgenes(allBeta, allPheno, summary2)
+counted <- countValuesToPredict(cleared.data)
+save(cleared.data, file = "cleared.data.rda")
+save(counted, file = "counted.rda")
+```
+
+```{r}
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/cleared.data.rda")
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/counted.rda")
+load("selIBS_allDat_beclear.Rda")
+load("phenoAll.rda")
+corrected.data <- BEclear(cleared.data, parallel=TRUE, rowBlockSize=60, colBlockSize=60, 
+epochs=50, outputFormat="RData", dir=getwd())
+save(corrected.data, file =  "corrected.data.rda")
+
+png("boxplot_uncorr.png")
+makeBoxplot(betas1, pbmcBat, score, bySamples=TRUE, col="standard", main="IBD-IBS data", xlab="Batch", 
+ylab="Beta value", scoreCol=TRUE)
+dev.off()
+```
+
+```{r}
+png("boxplot_corr.png")
+makeBoxplot(corrected.data, pbmcBat, score, bySamples=TRUE, col="standard", main="Corrected IBD-IBS 
+data", xlab="Batch", ylab="Beta value", scoreCol=FALSE)
+dev.off()
+
+save(summary1,summary2, score, cleared.data, counted, corrected.data, mdifs, pvals, file = 
+"resultsIBSIBD.Rda")
+```
+
+```{r}
+cleared.data2 <- na.omit(cleared.data)
+phenoAll1 <- phenoAll[row.names(phenoAll)%in%colnames(cleared.data2),]
+phenoAll1$Dx <- gsub("UC", "IBD",phenoAll1$Dx)
+phenoAll1$Dx <- gsub("CD", "IBD",phenoAll1$Dx)
+phenoAll2 <- subset(phenoAll1, phenoAll1$Dx == "IBS" | phenoAll1$Dx == "IBD") 
+cleared.data3 <- cleared.data2[,colnames(cleared.data2)%in%row.names(phenoAll2)]
+cleared.data3 <- cleared.data2[,row.names(phenoAll2)]
+all.equal(row.names(phenoAll2),colnames(cleared.data3))
+cleared.data4 <- as.matrix(cleared.data3)
+cleared.data4 <- matrix(cleared.data4, nrow = dim(cleared.data3)[1], ncol =dim(cleared.data3)[2])
+row.names(cleared.data4) <- row.names(cleared.data3)
+colnames(cleared.data4) <- colnames(cleared.data3)
+```
+
+```{r}
+phenoAll$Dx <- gsub("UC", "IBD", phenoAll$Dx)
+phenoAll$Dx <- gsub("CD", "IBD", phenoAll$Dx)
+phenoAll.hc  <- subset(phenoAll, phenoAll$Dx == "HC")
+phenoAll.ibs <- subset(phenoAll, phenoAll$Dx == "IBS")
+phenoAll.nor <- subset(phenoAll, phenoAll$Dx == "nor")
+phenoAll.ibd <- subset(phenoAll, phenoAll$Dx == "IBD")
+ibs.hc       <- cleared.data2[,colnames(cleared.data2)%in%row.names(phenoAll.hc)]
+ibd.nor      <- cleared.data2[,colnames(cleared.data2)%in%row.names(phenoAll.nor)]
+ibd.nor1     <- matrix(as.numeric(as.character(as.matrix(ibd.nor))), nrow = dim(ibd.nor)[1], ncol = dim(ibd.nor)[2])
+row.names(ibd.nor1) <- row.names(ibd.nor)
+colnames(ibd.nor1)  <- colnames(ibd.nor)
+ibs                 <- cleared.data2[,colnames(cleared.data2)%in%row.names(phenoAll.ibs)]
+ibd                 <- cleared.data2[,colnames(cleared.data2)%in%row.names(phenoAll.ibd)]
+ibd1                <- matrix(as.numeric(as.character(as.matrix(ibd))), nrow = dim(ibd)[1], ncol = dim(ibd)[2])
+row.names(ibd1) <- row.names(ibd)
+colnames(ibd1)  <- colnames(ibd)
+
+mean1 <- apply(ibs.hc,1,mean, na.rm = TRUE) 
+mean2 <- apply(ibd.nor1,1,mean, na.rm = TRUE)
+hcDiff <- mean1-mean2
+# ibd1 <- t(ibd_beta[row.names(pbmc_betas.ibs),])
+# pbmc_betas.ibs1 <- t(pbmc_betas.ibs)
+all.equal(row.names(ibd1), row.names(ibs))
+
+rep.col<-function(x,n){
+   matrix(rep(x,each=n), ncol=n, byrow=TRUE)
+}
+hcDiffMat <- rep.col(hcDiff, 28)
+ibd3 <- ibd1 + hcDiffMat
+save(ibd1, ibd3, hcDiff, file = "C:/Users/swapnajoshi-
+admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/randomForestClass/disease_controls/correcti
+onIbd.Rda")
+
+allBetas10 <- cbind(ibs, ibd3)
+allpheno10 <- phenoAll[row.names(phenoAll) %in% colnames(allBetas10),]
+allpheno10 <- allpheno10[colnames(allBetas10),]
+all.equal(row.names(allpheno10),colnames(allBetas10))
+```
+
+```{r}
+library(limma)
+allpheno10$Age[47] <- 60
+design <- model.matrix(~0 + allpheno10$Dx + as.numeric(allpheno10$Age))
+fit <- lmFit(allBetas10,design)
+fit <- eBayes(fit)
+res1 <- topTable(fit, coef=allpheno10$DxIBS, number = dim(allBetas10)[1])
+resOrd <- res1[order(res1$P.Value),]
+
+pbmcIBD_IBSDMPs <- dmpFinder(as.matrix(allBetas10), allpheno10$Dx, type = "categorical", qCutoff = 1, shrinkVar = TRUE)
+pbmcIBD_IBSDMPs$MD <- rowMeans(allBetas10[colnames(allBetas10)%in%row.names(subset(allpheno10, allpheno10$Dx =="IBS"))]) - rowMeans(allBetas10[colnames(allBetas10)%in%row.names(subset(allpheno10, allpheno10$Dx =="IBD"))])
+
+ pbmcIBD_IBSDMPs1 <- subset(pbmcIBD_IBSDMPs, pbmcIBD_IBSDMPs$qval<0.01)
+ dim(pbmcIBD_IBSDMPs1)
+ 
+save(pbmcIBD_IBSDMPs, pbmcIBD_IBSDMPs1, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/randomForestClass/disease_controls/pbmcIBD_IBSDMPs.Rda")
+write.csv(pbmcIBD_IBSDMPs1, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/randomForestClass/disease_controls/pbmcIBD_IBSDMPs.csv")
+save(allpheno10, allBetas10, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/randomForestClass/disease_controls/pbmcIBD_IBS_data_bckgCor.Rda")
+```
+
+```{r}
+library(randomForest)
+all.equal(colnames(allBetas10), row.names(allpheno10))
+allBetas11 <- as.data.frame(t(allBetas10[row.names(allBetas10)%in%row.names(pbmcIBD_IBSDMPs1),]))
+allBetas11$Dx <- allpheno10$Dx
+
+set.seed(123, "L'Ecuyer")
+rf.ibd <- randomForest(as.factor(Dx) ~ . , data = allBetas11, importance = TRUE)
+```
+
+```{r}
+to.keep <- row.names(data.frame(rf.ibd$importance)[rev(order(data.frame(rf.ibd
+$importance)$MeanDecreaseAccuracy)),])[1:100]
+ibdIbs <-  allBetas11[,to.keep]; dim(ibdIbs)
+```
+
+```{r}
+set.seed(123, "L'Ecuyer")
+rf2=randomForest(as.factor(allBetas11$Dx) ~ . , data = ibdIbs , importance = TRUE)
+rf2
+plot(rf2)
+varImpPlot(rf2)
+```
+
+```{r}
+library(ROCR)
+#prediction is ROCR function
+set.seed(123, "L'Ecuyer")
+rf.pred <- predict(rf2, newdata = ibdIbs,type="prob")[,2]
+set.seed(123, "L'Ecuyer")
+rf.pred1 = prediction(rf.pred, as.factor(allBetas11$Dx))
+ 
+#performance in terms of true and false positive rates
+set.seed(123, "L'Ecuyer")
+rf.perf1 = performance(rf.pred1,"tpr","fpr")
+plot(perf, avg = "threshold",spread.estimate="boxplot")
+```
+
+
+```{r}
+#plot the curve
+plot(rf.perf1,main="ROC Curve for Random Forest Classifier",col=2,lwd=2); abline(a=0,b=1,lwd=2,lty=2,col="gray")
+# plot(rf.perf1,lwd=3,avg="vertical",spread.estimate="boxplot",add=TRUE)
+ library(verification)
+#compute area under curve
+auc <- performance(rf.pred1,"auc")
+auc <- unlist(slot(auc, "y.values"))
+minauc<-min(round(auc, digits = 2))
+maxauc<-max(round(auc, digits = 2))
+minauct <- paste(c("min(AUC) = "),minauc,sep="")
+maxauct <- paste(c("max(AUC) = "),maxauc,sep="")
+d <- as.numeric(unlist(slot(rf.pred1,"predictions")))
+a <- gsub("IBS",1,allBetas11$Dx)
+a <- gsub("IBD",0,a)
+a <- as.numeric(as.character(a))
+A<- data.frame(a,d)
+names(A)<- c("Dx", "p2")
+roc.area(A$Dx, A$p2)
+```
+
+# posisitve and negative predictive values
+```{r}
+# install.packages("pROC")
+library(pROC)
+test1       <- as.data.frame(ibdIbs)
+test1$pred1 <- unlist(rf.pred1@predictions)
+test1$Dx <- allBetas11$Dx
+
+proc1       <- roc(test1$Dx, test1$pred1, percent = TRUE, plot = TRUE)
+plot(proc1, col = "blue")
+# coords(smooth(proc1), 80, "specificity")
+# Get the sensitivities for all thresholds
+sensitivities <- coords(proc1, proc1$thresholds, "thr", "se")
+# Get the best threshold
+coords(proc1, "b", ret="t")
+```
+```{r}
+opt.cut = function(perf, pred){
+    cut.ind = mapply(FUN=function(x, y, p){
+        d = (x - 0)^2 + (y-1)^2
+        ind = which(d == min(d))
+        c(sensitivity = y[[ind]], specificity = 1-x[[ind]], 
+            cutoff = p[[ind]])
+    }, perf@x.values, perf@y.values, pred@cutoffs)
+}
+print(opt.cut(rf.perf1, rf.pred1))
+```
+
+
+```{r}
+rf.pred4 <- as.data.frame(as.matrix(unlist(rf.pred1@"predictions")))
+
+rf.pred4$Group <- as.factor(allBetas11$Dx)
+
+ggplot(rf.pred4, aes(x = rf.pred4$Group, y = rf.pred4$V1, fill = rf.pred4$Group)) + geom_boxplot() + xlab("Group") + ylab("Predictions")
+```
+
+```{r}
+# Get the best threshold according to different methods
+coords(proc1, "b", ret="t", best.method="youden") # default
+coords(proc1, "b", ret="t", best.method="closest.topleft")
+plot(specificity + sensitivity ~ threshold, t(coords(proc1, seq(0, 1, 0.01))), type = "l")
+
+## Coordinates of the curve ##
+coords(proc1, "best", ret=c("threshold", "specificity", "1-npv"))
+coords(proc1, "local maximas", ret=c("threshold", "sens", "spec", "ppv", "npv"))
+```
+# annotations
+
+```{r}
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/data1/consistant_data/hm450annotations.rda")
+pbmcIBD_IBSDMPs_2 <- pbmcIBD_IBSDMPs[row.names(pbmcIBD_IBSDMPs)%in%colnames(ibdIbs),]
+ann100   <- hm450annotations[row.names(hm450annotations)%in%row.names(pbmcIBD_IBSDMPs_2),]
+ann100_1 <- ann100[row.names(pbmcIBD_IBSDMPs_2),]
+
+all.equal(row.names(ann100_1),row.names(pbmcIBD_IBSDMPs_2))
+ann100_ibsibd <- cbind(ann100_1, pbmcIBD_IBSDMPs_2)
+
+ann3133  <- pbmcIBD_IBSDMPs1[row.names(pbmcIBD_IBSDMPs1)%in%row.names(hm450annotations),]
+ann450kSub1 <- hm450annotations[row.names(hm450annotations)%in%row.names(ann3133),]
+ann450kSub1 <- hm450annotations[row.names(ann3133),]
+all.equal(row.names(ann3133),row.names(ann450kSub1))
+ann3133 <- cbind(ann3133, ann450kSub1)
+
+write.csv(ann100, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/randomForestClass/disease_controls/Annotated_ibd_ibs_probes.csv")
+write.csv(ann3133, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/randomForestClass/disease_controls/Annotated_ibd_ibs_probes3133.csv")
+write.csv(ann100_ibsibd , file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/randomForestClass/disease_controls/ann100_ibsibd.csv")
+```
+
+
+
+
+
+#### without correcting the HCs
+```{r}
+library(limma)
+phenoAll2$Age[19] <- 60
+design <- model.matrix(~0 + phenoAll2$Dx + as.numeric(phenoAll2$Age))
+fit <- lmFit(cleared.data4,design)
+fit <- eBayes(fit)
+res1 <- topTable(fit, coef=phenoAll$DxIBS, number = dim(cleared.data4)[1])
+resOrd <- res1[order(res1$P.Value),]
+
+pbmcIBD_IBSDMPs <- dmpFinder(cleared.data4, phenoAll2$Dx, type = "categorical", qCutoff = 1, shrinkVar = TRUE)
+ pbmcIBD_IBSDMPs1 <- subset(pbmcIBD_IBSDMPs, pbmcIBD_IBSDMPs$qval<0.01)
+ dim(pbmcIBD_IBSDMPs1)
+save(pbmcIBD_IBSDMPs, pbmcIBD_IBSDMPs1, file = "C:/Users/swapnajoshi-
+admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/randomForestClass/disease_controls/pbmcIBD_
+IBSDMPs.rda")
+write.csv(pbmcIBD_IBSDMPs1, file = "C:/Users/swapnajoshi-
+admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/randomForestClass/disease_controls/pbmcIBD_
+IBSDMPs.csv")
+```
+

@@ -1,0 +1,1385 @@
+####################
+# DMPs for BH
+####################
+```{r}
+source("https://bioconductor.org/biocLite.R")
+biocLite(c('Biobase', 'BiocGenerics', 'ChAMPdata', 'DMRcatedata',
+  'GenomeInfoDb', 'GO.db', 'GSVAdata', 'hgu133a.db', 'hgu133plus2.db',
+  'hgu95a.db', 'hgu95av2.db', 'IlluminaHumanMethylation450kanno.ilmn12.hg19',
+  'IlluminaHumanMethylationEPICanno.ilm10b2.hg19', 'IRanges', 'org.Hs.eg.db',
+  'purrr', 'S4Vectors'))
+```
+
+```{r}
+dmpSumDxBH <- function(x) {
+  mval <- getM(x) 
+  Dx <- factor(pData(x)$Dx)
+  BH <- factor(pData(x)$BH)
+  design1 <- model.matrix (~0+Dx,data=pData(x))
+  colnames(design1) <- levels(Dx)
+  design2 <- model.matrix (~0+BH,data=pData(x))
+  colnames(design2) <- levels(BH)
+  fit1 <- lmFit (mval, design1)
+  fit2 <- lmFit (mval, design2)
+  contMatrix1 <- makeContrasts(HC-IBS, levels=design1)
+  contMatrix2 <- makeContrasts(C-D,C-M,C-N,D-M,D-N,M-N, levels=design2)
+  fitB1 <- contrasts.fit(fit1, contMatrix1)
+  fitB1 <- eBayes(fitB1)
+  fitB2 <- contrasts.fit(fit2, contMatrix2)
+  fitB2 <- eBayes(fitB2)
+  tt1<- topTable(fitB1, number = 287917)
+  tt2<- topTable(fitB2, number = 287917)
+  p1 <- subset(tt1,tt1$P.Value<0.05)
+  p2 <- subset(tt2,tt2$P.Value<0.05)
+  q1 <- subset(tt1,tt1$adj.P.Val<0.05)
+  q2 <- subset(tt2,tt2$adj.P.Val<0.05)
+  
+  TableNum <- rbind(matrix(c(dim(p1)[1],dim(p2)[1]), nrow= 2, ncol = 1), matrix(c(dim(q1)[1],dim(q2)[1]), nrow= 2, ncol = 1))
+  row.names(TableNum) <- c("Dx_p<0.05", "BH_p<0.05", "Dx_FDR<0.05", "BH_FDR<0.05")
+  colnames(TableNum) <- "N"
+  
+  save(fitB1, file = paste(deparse(substitute(x)),"fitB1.Rda", sep = ""))
+  save(fitB2, file = paste(deparse(substitute(x)),"fitB2.Rda", sep = ""))
+  
+  write.csv(p1, file = paste(deparse(substitute(x)),"DxP.csv", sep = ""))
+  write.csv(p2, file = paste(deparse(substitute(x)),"BHP.csv", sep = ""))
+  
+  write.csv (TableNum, file = paste(deparse(substitute(x)),"TableNum.CSV", sep = ""))
+  print(TableNum)
+  
+}
+
+geneNames <- function(x) {
+  probes=hm450[x]
+  CpG_an <- getNearestGene(probes)
+  return (CpG_an)
+}
+```
+##########################################################################
+heatmap.3
+###########################################################################
+```{r}
+heatmap.3 <- function(x,
+		Rowv = TRUE, Colv = if (symm) "Rowv" else TRUE,
+		distfun = dist,
+		hclustfun = hclust,
+		dendrogram = c("both","row", "column", "none"),
+		symm = FALSE,
+		scale = c("none","row", "column"),
+		na.rm = TRUE,
+		revC = identical(Colv,"Rowv"),
+		add.expr,
+		breaks ,
+		symbreaks = max(x < 0, na.rm = TRUE) || scale != "none",
+		col = colorRampPalette(c("green","lightgreen", "black","orange", "red"))(100), #function(x)rev(heat.colors(x)),
+		colsep,
+		rowsep,
+		sepcolor = "white",
+		sepwidth = c(0.05, 0.05),
+		cellnote,
+		notecex = 1,
+		notecol = "cyan",
+		na.color = par("bg"),
+		trace = c("none", "column","row", "both"),
+		tracecol = "cyan",
+		hline = median(breaks),
+		vline = median(breaks),
+		linecol = tracecol,
+		margins = c(5,5),
+		ColSideColors,
+		RowSideColors,
+		side.height.fraction=0.3,
+		cexRow = 0.2 + 1/log10(nr),
+		cexCol = 0.2 + 1/log10(nc),
+		labRow = NULL,
+		labCol = NULL,
+		key = TRUE,
+		keysize = 1.5,
+		density.info = c("none", "histogram", "density"),
+		denscol = tracecol,
+		symkey = max(x < 0, na.rm = TRUE) || symbreaks,
+		densadj = 0.25,
+		main = NULL,
+		xlab = NULL,
+		ylab = NULL,
+		lmat = NULL,
+		lhei = NULL,
+		lwid = NULL,
+		NumColSideColors = 1,
+		NumRowSideColors = 1,
+		KeyValueName="Value",...){
+	
+	invalid <- function (x) {
+		if (missing(x) || is.null(x) || length(x) == 0)
+			return(TRUE)
+		if (is.list(x))
+			return(all(sapply(x, invalid)))
+		else if (is.vector(x))
+			return(all(is.na(x)))
+		else return(FALSE)
+	}
+	
+	x <- as.matrix(x)
+	scale01 <- function(x, low = min(x), high = max(x)) {
+		x <- (x - low)/(high - low)
+		x
+	}
+	retval <- list()
+	scale <- if (symm && missing(scale))
+				"none"
+			else match.arg(scale)
+	dendrogram <- match.arg(dendrogram)
+	trace <- match.arg(trace)
+	density.info <- match.arg(density.info)
+	if (length(col) == 1 && is.character(col))
+		col <- get(col, mode = "function")
+	if (!missing(breaks) && (scale != "none"))
+		warning("Using scale=\"row\" or scale=\"column\" when breaks are",
+				"specified can produce unpredictable results.", "Please consider using only one or the other.")
+	if (is.null(Rowv) || is.na(Rowv))
+		Rowv <- FALSE
+	if (is.null(Colv) || is.na(Colv))
+		Colv <- FALSE
+	else if (Colv == "Rowv" && !isTRUE(Rowv))
+		Colv <- FALSE
+	if (length(di <- dim(x)) != 2 || !is.numeric(x))
+		stop("`x' must be a numeric matrix")
+	nr <- di[1]
+	nc <- di[2]
+	if (nr <= 1 || nc <= 1)
+		stop("`x' must have at least 2 rows and 2 columns")
+	if (!is.numeric(margins) || length(margins) != 2)
+		stop("`margins' must be a numeric vector of length 2")
+	if (missing(cellnote))
+		cellnote <- matrix("", ncol = ncol(x), nrow = nrow(x))
+	if (!inherits(Rowv, "dendrogram")) {
+		if (((!isTRUE(Rowv)) || (is.null(Rowv))) && (dendrogram %in%
+					c("both", "row"))) {
+			if (is.logical(Colv) && (Colv))
+				dendrogram <- "column"
+			else dedrogram <- "none"
+			warning("Discrepancy: Rowv is FALSE, while dendrogram is `",
+					dendrogram, "'. Omitting row dendogram.")
+		}
+	}
+	if (!inherits(Colv, "dendrogram")) {
+		if (((!isTRUE(Colv)) || (is.null(Colv))) && (dendrogram %in%
+					c("both", "column"))) {
+			if (is.logical(Rowv) && (Rowv))
+				dendrogram <- "row"
+			else dendrogram <- "none"
+			warning("Discrepancy: Colv is FALSE, while dendrogram is `",
+					dendrogram, "'. Omitting column dendogram.")
+		}
+	}
+	if (inherits(Rowv, "dendrogram")) {
+		ddr <- Rowv
+		rowInd <- order.dendrogram(ddr)
+	}
+	else if (is.integer(Rowv)) {
+		hcr <- hclustfun(distfun(x))
+		ddr <- as.dendrogram(hcr)
+		ddr <- reorder(ddr, Rowv)
+		rowInd <- order.dendrogram(ddr)
+		if (nr != length(rowInd))
+			stop("row dendrogram ordering gave index of wrong length")
+	}
+	else if (isTRUE(Rowv)) {
+		Rowv <- rowMeans(x, na.rm = na.rm)
+		hcr <- hclustfun(distfun(x))
+		ddr <- as.dendrogram(hcr)
+		ddr <- reorder(ddr, Rowv)
+		rowInd <- order.dendrogram(ddr)
+		if (nr != length(rowInd))
+			stop("row dendrogram ordering gave index of wrong length")
+	}
+	else {
+		rowInd <- nr:1
+	}
+	if (inherits(Colv, "dendrogram")) {
+		ddc <- Colv
+		colInd <- order.dendrogram(ddc)
+	}
+	else if (identical(Colv, "Rowv")) {
+		if (nr != nc)
+			stop("Colv = \"Rowv\" but nrow(x) != ncol(x)")
+		if (exists("ddr")) {
+			ddc <- ddr
+			colInd <- order.dendrogram(ddc)
+		}
+		else colInd <- rowInd
+	}
+	else if (is.integer(Colv)) {
+		hcc <- hclustfun(distfun(if (symm)
+									x
+								else t(x)))
+		ddc <- as.dendrogram(hcc)
+		ddc <- reorder(ddc, Colv)
+		colInd <- order.dendrogram(ddc)
+		if (nc != length(colInd))
+			stop("column dendrogram ordering gave index of wrong length")
+	}
+	else if (isTRUE(Colv)) {
+		Colv <- colMeans(x, na.rm = na.rm)
+		hcc <- hclustfun(distfun(if (symm)
+									x
+								else t(x)))
+		ddc <- as.dendrogram(hcc)
+		ddc <- reorder(ddc, Colv)
+		colInd <- order.dendrogram(ddc)
+		if (nc != length(colInd))
+			stop("column dendrogram ordering gave index of wrong length")
+	}
+	else {
+		colInd <- 1:nc
+	}
+	retval$rowInd <- rowInd
+	retval$colInd <- colInd
+	retval$call <- match.call()
+	x <- x[rowInd, colInd]
+	x.unscaled <- x
+	cellnote <- cellnote[rowInd, colInd]
+	if (is.null(labRow))
+		labRow <- if (is.null(rownames(x)))
+					(1:nr)[rowInd]
+				else rownames(x)
+	else labRow <- labRow[rowInd]
+	if (is.null(labCol))
+		labCol <- if (is.null(colnames(x)))
+					(1:nc)[colInd]
+				else colnames(x)
+	else labCol <- labCol[colInd]
+	if (scale == "row") {
+		retval$rowMeans <- rm <- rowMeans(x, na.rm = na.rm)
+		x <- sweep(x, 1, rm)
+		retval$rowSDs <- sx <- apply(x, 1, sd, na.rm = na.rm)
+		x <- sweep(x, 1, sx, "/")
+	}
+	else if (scale == "column") {
+		retval$colMeans <- rm <- colMeans(x, na.rm = na.rm)
+		x <- sweep(x, 2, rm)
+		retval$colSDs <- sx <- apply(x, 2, sd, na.rm = na.rm)
+		x <- sweep(x, 2, sx, "/")
+	}
+	if (missing(breaks) || is.null(breaks) || length(breaks) < 1) {
+		if (missing(col) || is.function(col))
+			breaks <- 16
+		else breaks <- length(col) + 1
+	}
+	if (length(breaks) == 1) {
+		if (!symbreaks)
+			breaks <- seq(min(x, na.rm = na.rm), max(x, na.rm = na.rm),
+					length = breaks)
+		else {
+			extreme <- max(abs(x), na.rm = TRUE)
+			breaks <- seq(-extreme, extreme, length = breaks)
+		}
+	}
+	nbr <- length(breaks)
+	ncol <- length(breaks) - 1
+	if (class(col) == "function")
+		col <- col(ncol)
+	min.breaks <- min(breaks)
+	max.breaks <- max(breaks)
+	x[x < min.breaks] <- min.breaks
+	x[x > max.breaks] <- max.breaks
+	if (missing(lhei) || is.null(lhei))
+		lhei <- c(keysize, 4)
+	if (missing(lwid) || is.null(lwid))
+		lwid <- c(keysize, 4)
+	if (missing(lmat) || is.null(lmat)) {
+		lmat <- rbind(4:3, 2:1)
+		
+		if (!missing(ColSideColors)) {
+#if (!is.matrix(ColSideColors))
+#stop("'ColSideColors' must be a matrix")
+			if (!is.character(ColSideColors) || nrow(ColSideColors) != nc)
+				stop("'ColSideColors' must be a matrix of nrow(x) rows")
+			lmat <- rbind(lmat[1, ] + 1, c(NA, 1), lmat[2, ] + 1)
+#lhei <- c(lhei[1], 0.2, lhei[2])
+			lhei=c(lhei[1], side.height.fraction*NumColSideColors, lhei[2])
+		}
+		
+		if (!missing(RowSideColors)) {
+#if (!is.matrix(RowSideColors))
+#stop("'RowSideColors' must be a matrix")
+			if (!is.character(RowSideColors) || ncol(RowSideColors) != nr)
+				stop("'RowSideColors' must be a matrix of ncol(x) columns")
+			lmat <- cbind(lmat[, 1] + 1, c(rep(NA, nrow(lmat) - 1), 1), lmat[,2] + 1)
+#lwid <- c(lwid[1], 0.2, lwid[2])
+			lwid <- c(lwid[1], side.height.fraction*NumRowSideColors, lwid[2])
+		}
+		lmat[is.na(lmat)] <- 0
+	}
+	
+	if (length(lhei) != nrow(lmat))
+		stop("lhei must have length = nrow(lmat) = ", nrow(lmat))
+	if (length(lwid) != ncol(lmat))
+		stop("lwid must have length = ncol(lmat) =", ncol(lmat))
+	op <- par(no.readonly = TRUE)
+	on.exit(par(op))
+	
+	layout(lmat, widths = lwid, heights = lhei, respect = FALSE)
+	
+	if (!missing(RowSideColors)) {
+		if (!is.matrix(RowSideColors)){
+			par(mar = c(margins[1], 0, 0, 0.5))
+			image(rbind(1:nr), col = RowSideColors[rowInd], axes = FALSE)
+		} else {
+			par(mar = c(margins[1], 0, 0, 0.5))
+			rsc = t(RowSideColors[,rowInd, drop=F])
+			rsc.colors = matrix()
+			rsc.names = names(table(rsc))
+			rsc.i = 1
+			for (rsc.name in rsc.names) {
+				rsc.colors[rsc.i] = rsc.name
+				rsc[rsc == rsc.name] = rsc.i
+				rsc.i = rsc.i + 1
+			}
+			rsc = matrix(as.numeric(rsc), nrow = dim(rsc)[1])
+			image(t(rsc), col = as.vector(rsc.colors), axes = FALSE)
+			if (length(colnames(RowSideColors)) > 0) {
+				axis(1, 0:(dim(rsc)[2] - 1)/(dim(rsc)[2] - 1), colnames(RowSideColors), las = 2, tick = FALSE)
+			}
+		}
+	}
+	
+	if (!missing(ColSideColors)) {
+		
+		if (!is.matrix(ColSideColors)){
+			par(mar = c(0.5, 0, 0, margins[2]))
+			image(cbind(1:nc), col = ColSideColors[colInd], axes = FALSE)
+		} else {
+			par(mar = c(0.5, 0, 0, margins[2]))
+			csc = ColSideColors[colInd, , drop=F]
+			csc.colors = matrix()
+			csc.names = names(table(csc))
+			csc.i = 1
+			for (csc.name in csc.names) {
+				csc.colors[csc.i] = csc.name
+				csc[csc == csc.name] = csc.i
+				csc.i = csc.i + 1
+			}
+			csc = matrix(as.numeric(csc), nrow = dim(csc)[1])
+			image(csc, col = as.vector(csc.colors), axes = FALSE)
+			if (length(colnames(ColSideColors)) > 0) {
+				axis(2, 0:(dim(csc)[2] - 1)/max(1,(dim(csc)[2] - 1)), colnames(ColSideColors), las = 2, tick = FALSE)
+			}
+		}
+	}
+	
+	par(mar = c(margins[1], 0, 0, margins[2]))
+	x <- t(x)
+	cellnote <- t(cellnote)
+	if (revC) {
+		iy <- nr:1
+		if (exists("ddr"))
+			ddr <- rev(ddr)
+		x <- x[, iy]
+		cellnote <- cellnote[, iy]
+	}
+	else iy <- 1:nr
+	image(1:nc, 1:nr, x, xlim = 0.5 + c(0, nc), ylim = 0.5 + c(0, nr), axes = FALSE, xlab = "", ylab = "", col = col, breaks = breaks, ...)
+	retval$carpet <- x
+	if (exists("ddr"))
+		retval$rowDendrogram <- ddr
+	if (exists("ddc"))
+		retval$colDendrogram <- ddc
+	retval$breaks <- breaks
+	retval$col <- col
+	if (!invalid(na.color) & any(is.na(x))) { # load library(gplots)
+		mmat <- ifelse(is.na(x), 1, NA)
+		image(1:nc, 1:nr, mmat, axes = FALSE, xlab = "", ylab = "",
+				col = na.color, add = TRUE)
+	}
+	axis(1, 1:nc, labels = labCol, las = 2, line = -0.5, tick = 0,
+			cex.axis = cexCol)
+	if (!is.null(xlab))
+		mtext(xlab, side = 1, line = margins[1] - 1.25)
+	axis(4, iy, labels = labRow, las = 2, line = -0.5, tick = 0,
+			cex.axis = cexRow)
+	if (!is.null(ylab))
+		mtext(ylab, side = 4, line = margins[2] - 1.25)
+	if (!missing(add.expr))
+		eval(substitute(add.expr))
+	if (!missing(colsep))
+		for (csep in colsep) rect(xleft = csep + 0.5, ybottom = rep(0, length(csep)), xright = csep + 0.5 + sepwidth[1], ytop = rep(ncol(x) + 1, csep), lty = 1, lwd = 1, col = sepcolor, border = sepcolor)
+	if (!missing(rowsep))
+		for (rsep in rowsep) rect(xleft = 0, ybottom = (ncol(x) + 1 - rsep) - 0.5, xright = nrow(x) + 1, ytop = (ncol(x) + 1 - rsep) - 0.5 - sepwidth[2], lty = 1, lwd = 1, col = sepcolor, border = sepcolor)
+	min.scale <- min(breaks)
+	max.scale <- max(breaks)
+	x.scaled <- scale01(t(x), min.scale, max.scale)
+	if (trace %in% c("both", "column")) {
+		retval$vline <- vline
+		vline.vals <- scale01(vline, min.scale, max.scale)
+		for (i in colInd) {
+			if (!is.null(vline)) {
+				abline(v = i - 0.5 + vline.vals, col = linecol,
+						lty = 2)
+			}
+			xv <- rep(i, nrow(x.scaled)) + x.scaled[, i] - 0.5
+			xv <- c(xv[1], xv)
+			yv <- 1:length(xv) - 0.5
+			lines(x = xv, y = yv, lwd = 1, col = tracecol, type = "s")
+		}
+	}
+	if (trace %in% c("both", "row")) {
+		retval$hline <- hline
+		hline.vals <- scale01(hline, min.scale, max.scale)
+		for (i in rowInd) {
+			if (!is.null(hline)) {
+				abline(h = i + hline, col = linecol, lty = 2)
+			}
+			yv <- rep(i, ncol(x.scaled)) + x.scaled[i, ] - 0.5
+			yv <- rev(c(yv[1], yv))
+			xv <- length(yv):1 - 0.5
+			lines(x = xv, y = yv, lwd = 1, col = tracecol, type = "s")
+		}
+	}
+	if (!missing(cellnote))
+		text(x = c(row(cellnote)), y = c(col(cellnote)), labels = c(cellnote),
+				col = notecol, cex = notecex)
+	par(mar = c(margins[1], 0, 0, 0))
+	if (dendrogram %in% c("both", "row")) {
+		plot(ddr, horiz = TRUE, axes = FALSE, yaxs = "i", leaflab = "none")
+	}
+	else plot.new()
+	par(mar = c(0, 0, if (!is.null(main)) 5 else 0, margins[2]))
+	if (dendrogram %in% c("both", "column")) {
+		plot(ddc, axes = FALSE, xaxs = "i", leaflab = "none")
+	}
+	else plot.new()
+	if (!is.null(main))
+		title(main, cex.main = 1.5 * op[["cex.main"]])
+	if (key) {
+		par(mar = c(5, 4, 2, 1), cex = 0.75)
+		tmpbreaks <- breaks
+		if (symkey) {
+			max.raw <- max(abs(c(x, breaks)), na.rm = TRUE)
+			min.raw <- -max.raw
+			tmpbreaks[1] <- -max(abs(x), na.rm = TRUE)
+			tmpbreaks[length(tmpbreaks)] <- max(abs(x), na.rm = TRUE)
+		}
+		else {
+			min.raw <- min(x, na.rm = TRUE)
+			max.raw <- max(x, na.rm = TRUE)
+		}
+		
+		z <- seq(min.raw, max.raw, length = length(col))
+		image(z = matrix(z, ncol = 1), col = col, breaks = tmpbreaks,
+				xaxt = "n", yaxt = "n")
+		par(usr = c(0, 1, 0, 1))
+		lv <- pretty(breaks)
+		xv <- scale01(as.numeric(lv), min.raw, max.raw)
+		axis(1, at = xv, labels = lv)
+		if (scale == "row")
+			mtext(side = 1, "Row Z-Score", line = 2)
+		else if (scale == "column")
+			mtext(side = 1, "Column Z-Score", line = 2)
+		else mtext(side = 1, KeyValueName, line = 2)
+		if (density.info == "density") {
+			dens <- density(x, adjust = densadj, na.rm = TRUE)
+			omit <- dens$x < min(breaks) | dens$x > max(breaks)
+			dens$x <- dens$x[-omit]
+			dens$y <- dens$y[-omit]
+			dens$x <- scale01(dens$x, min.raw, max.raw)
+			lines(dens$x, dens$y/max(dens$y) * 0.95, col = denscol,
+					lwd = 1)
+			axis(2, at = pretty(dens$y)/max(dens$y) * 0.95, pretty(dens$y))
+			title("Color Key\nand Density Plot")
+			par(cex = 0.5)
+			mtext(side = 2, "Density", line = 2)
+		}
+		else if (density.info == "histogram") {
+			h <- hist(x, plot = FALSE, breaks = breaks)
+			hx <- scale01(breaks, min.raw, max.raw)
+			hy <- c(h$counts, h$counts[length(h$counts)])
+			lines(hx, hy/max(hy) * 0.95, lwd = 1, type = "s",
+					col = denscol)
+			axis(2, at = pretty(hy)/max(hy) * 0.95, pretty(hy))
+			title("Color Key\nand Histogram")
+			par(cex = 0.5)
+			mtext(side = 2, "Count", line = 2)
+		}
+		else title("Color Key")
+	}
+	else plot.new()
+	retval$colorTable <- data.frame(low = retval$breaks[-length(retval$breaks)],
+			high = retval$breaks[-1], color = retval$col)
+	invisible(retval)
+}
+```
+
+
+##############################################################
+#heatmap
+##############################################################
+```{r}
+################################################################################
+# Heatmap function; make a scaled dataframe and create the heatmap in object
+################################################################################
+heatmapZ <- function(x,a,b,d) {
+  library(matlab)
+  z <- t(apply(x, 1, scale))
+  row.names(z)<-row.names(x)
+  if(length(levels(factor(a))) == 2) {
+  col1 <- gsub(levels(factor(a))[1],"red", a)
+  col1 <- gsub(levels(factor(a))[2],"blue", col1)
+  } else if (length(levels(factor(a))) == 3) {
+  col1 <- gsub(levels(factor(a))[1],"red", a)
+  col1 <- gsub(levels(factor(a))[2],"blue", col1)
+  col1 <- gsub(levels(factor(a))[3],"green", col1)
+  }
+  if(length(levels(factor(b))) == 2) {
+    col2 <- gsub(levels(factor(b))[1],"purple", b)
+    col2 <- gsub(levels(factor(b))[2],"cyan", col2)
+  } else if (length(levels(factor(b))) == 3) {
+    col2 <- gsub(levels(factor(b))[1],"red", b)
+    col2 <- gsub(levels(factor(b))[2],"green", col2)
+    col2 <- gsub(levels(factor(b))[3],"blue", col2)
+  }
+    if(length(levels(factor(d))) == 2) {
+    col3 <- gsub(levels(factor(d))[1],"orange", d)
+    col3 <- gsub(levels(factor(d))[2],"dark blue", col3)
+  } else if (length(levels(factor(d))) == 3) {
+    col3 <- gsub(levels(factor(d))[1],"orange", d)
+    col3 <- gsub(levels(factor(d))[2],"dark blue", col3)
+    col3 <- gsub(levels(factor(d))[3],"dark green", col3)
+  }
+  col4 <- c(rep("white",dim(x)[2]))
+  colMat <- as.matrix(cbind(col1, col4, col2, col4, col3))
+  col.j<-jet.colors(75)
+  hm1<-heatmap.3(as.matrix(z),na.rm=TRUE,scale="none", ColSideColors = colMat,
+                 Colv=T,Rowv=T,
+                 cexRow=1,cexCol=1, main = paste("Heatmap", dim(z)[1],
+                 "Probes; ",dim(z)[2],"Samples"), labRow = row.names(z),
+                 labCol = colnames(z))
+  return(hm1)
+}
+
+```
+
+
+```{r}
+################################################################################
+# Heatmap function for Methylation from a methylGRset object ################################################################################
+heatmapMeth <- function(x,cpg,a,b,d) {
+  library(matlab)
+  library(RColorBrewer)
+  z <- getBeta(x)
+  df <- z[row.names(z)%in%cpg,]
+  df <- df[cpg,]
+  a <- eval(noquote(a))
+  b <- eval(noquote(b))
+  d <- eval(noquote(d))
+  if(length(levels(factor(a))) == 1) {
+    col1 <- gsub(levels(factor(a)),"orange", a)
+  }
+  else if(length(levels(factor(a))) == 2) {
+  col1 <- gsub(levels(factor(a))[1],"red", a)
+  col1 <- gsub(levels(factor(a))[2],"blue", col1)
+  } else if (length(levels(factor(a))) == 3) {
+  col1 <- gsub(levels(factor(a))[1],"red", a)
+  col1 <- gsub(levels(factor(a))[2],"blue", col1)
+  col1 <- gsub(levels(factor(a))[3],"green", col1)
+  }
+  else if (length(levels(factor(a))) == 4) {
+  col1 <- gsub(levels(factor(a))[1],"red", a)
+  col1 <- gsub(levels(factor(a))[2],"blue", col1)
+  col1 <- gsub(levels(factor(a))[3],"green", col1)
+  col1 <- gsub(levels(factor(a))[4],"purple", col1)
+  }
+    if(length(levels(factor(b))) == 1) {
+    col2 <- gsub(levels(factor(b)),"purple", b)
+  }
+    else if(length(levels(factor(b))) == 2) {
+    col2 <- gsub(levels(factor(b))[1],"purple", b)
+    col2 <- gsub(levels(factor(b))[2],"cyan", col2)
+    } else if (length(levels(factor(b))) == 3) {
+    col2 <- gsub(levels(factor(b))[1],"red", b)
+    col2 <- gsub(levels(factor(b))[2],"green", col2)
+    col2 <- gsub(levels(factor(b))[3],"blue", col2)
+    }
+      else if (length(levels(factor(b))) == 4) {
+      col2 <- gsub(levels(factor(b))[1],"red", b)
+      col2 <- gsub(levels(factor(b))[2],"blue", col2)
+      col2 <- gsub(levels(factor(b))[3],"green", col2)
+      col2 <- gsub(levels(factor(b))[4],"purple", col2)
+      }
+    if(length(levels(factor(d))) == 1) {
+    col3 <- gsub(levels(factor(d)),"green", d)
+  }
+        else if(length(levels(factor(d))) == 2) {
+        col3 <- gsub(levels(factor(d))[1],"orange", d)
+        col3 <- gsub(levels(factor(d))[2],"dark blue", col3)
+  } else if (length(levels(factor(d))) == 3) {
+    col3 <- gsub(levels(factor(d))[1],"orange", d)
+    col3 <- gsub(levels(factor(d))[2],"dark blue", col3)
+    col3 <- gsub(levels(factor(d))[3],"dark green", col3)
+  }
+   else if (length(levels(factor(d))) == 4) {
+  col3 <- gsub(levels(factor(d))[1],"red", d)
+  col3 <- gsub(levels(factor(d))[2],"blue", col3)
+  col3 <- gsub(levels(factor(d))[3],"green", col3)
+  col3 <- gsub(levels(factor(d))[4],"purple", col3)
+   }
+  
+  col4 <- c(rep("white",dim(df)[2]))
+  colMat <- as.matrix(cbind(col1, col4, col2, col4, col3))
+  col.j<-jet.colors(75)
+  hm1<-heatmap.3(as.matrix(df),na.rm=TRUE,scale="none", ColSideColors = colMat,
+                 Colv=T,Rowv=T,breaks = seq(0,1,0.01),
+                 cexRow=1,cexCol=1, main = paste("Heatmap", dim(df)[1],
+                 "Probes; ",dim(df)[2],"Samples"), labRow = row.names(df),
+                 labCol = colnames(df))
+  return(hm1)
+}
+
+```
+For methods heatmap with 2 variables, sex and batch
+```{r}
+################################################################################
+# Heatmap function for Methylation from a methylGRset object ################################################################################
+heatmapMethBa <- function(x,cpg,b,d) {
+  library(matlab)
+  library(RColorBrewer)
+  z <- getBeta(x)
+  df <- z[row.names(z)%in%cpg,]
+  df <- df[cpg,]
+  #a <- eval(noquote(a))
+  b <- eval(noquote(b))
+  d <- eval(noquote(d))
+  
+    if(length(levels(factor(b))) == 1) {
+    col2 <- gsub(levels(factor(b)),"purple", b)
+  }
+    else if(length(levels(factor(b))) == 2) {
+    col2 <- gsub(levels(factor(b))[1],"purple", b)
+    col2 <- gsub(levels(factor(b))[2],"cyan", col2)
+    } else if (length(levels(factor(b))) == 3) {
+    col2 <- gsub(levels(factor(b))[1],"red", b)
+    col2 <- gsub(levels(factor(b))[2],"green", col2)
+    col2 <- gsub(levels(factor(b))[3],"blue", col2)
+    }
+      else if (length(levels(factor(b))) == 4) {
+      col2 <- gsub(levels(factor(b))[1],"red", b)
+      col2 <- gsub(levels(factor(b))[2],"blue", col2)
+      col2 <- gsub(levels(factor(b))[3],"green", col2)
+      col2 <- gsub(levels(factor(b))[4],"purple", col2)
+      }
+    if(length(levels(factor(d))) == 1) {
+    col3 <- gsub(levels(factor(d)),"green", d)
+  }
+        else if(length(levels(factor(d))) == 2) {
+        col3 <- gsub(levels(factor(d))[1],"orange", d)
+        col3 <- gsub(levels(factor(d))[2],"dark blue", col3)
+  } else if (length(levels(factor(d))) == 3) {
+    col3 <- gsub(levels(factor(d))[1],"orange", d)
+    col3 <- gsub(levels(factor(d))[2],"dark blue", col3)
+    col3 <- gsub(levels(factor(d))[3],"dark green", col3)
+  }
+   else if (length(levels(factor(d))) == 4) {
+  col3 <- gsub(levels(factor(d))[1],"red", d)
+  col3 <- gsub(levels(factor(d))[2],"blue", col3)
+  col3 <- gsub(levels(factor(d))[3],"green", col3)
+  col3 <- gsub(levels(factor(d))[4],"purple", col3)
+   }
+  # for col batch var, there were 12 variables, 12 colors; there may be a better way to do this
+  # for pbmc batch var, there were 13 variables, 13 colors; there may be a better way to do this
+  else if (length(levels(factor(d))) == 13) {
+  col3 <- gsub(levels(factor(d))[1],"red", d)
+  col3 <- gsub(levels(factor(d))[2],"blue", col3)
+  col3 <- gsub(levels(factor(d))[3],"green", col3)
+  col3 <- gsub(levels(factor(d))[4],"purple", col3)
+  col3 <- gsub(levels(factor(d))[5],"pink", col3)
+  col3 <- gsub(levels(factor(d))[6],"darkblue", col3)
+  col3 <- gsub(levels(factor(d))[7],"darkgreen", col3)
+  col3 <- gsub(levels(factor(d))[8],"violet", col3)
+  col3 <- gsub(levels(factor(d))[9],"magenta", col3)
+  col3 <- gsub(levels(factor(d))[10],"cyan", col3)
+  col3 <- gsub(levels(factor(d))[11],"turquoise", col3)
+  col3 <- gsub(levels(factor(d))[12],"black", col3)
+  col3 <- gsub(levels(factor(d))[13],"grey", col3)
+  }
+  
+  col4 <- c(rep("white",dim(df)[2]))
+  colMat <- as.matrix(cbind(col2, col4, col3))
+  col.j<-jet.colors(75)
+  hm1<-heatmap.3(as.matrix(df),na.rm=TRUE,scale="none", ColSideColors = colMat,
+                 Colv=T,Rowv=T,breaks = seq(0,1,0.01),
+                 cexRow=1,cexCol=1, main = paste("Heatmap", dim(df)[1],
+                 "Probes; ",dim(df)[2],"Samples"), labRow = row.names(df),
+                 labCol = colnames(df))
+  return(hm1)
+}
+
+```
+#################################################################
+# DMPs 
+#################################################################
+
+```{r}
+
+DMPs <- function(x,y,a) {
+  z <- getM(x)
+  design <- model.matrix(~0+y, data=pData(x))
+  colnames(design) <- levels(factor(y))
+  fit <- lmFit(z, design)
+  str2 <- paste(levels(factor(y))[2],levels(factor(y))[1], sep = "-")
+  str1="makeContrasts(" 
+  str3=",levels=design)" 
+  strAll=paste(str1,str2,str3,sep="")
+  contMatrix <- eval(parse(text=strAll))
+  print(contMatrix)
+  fit2 <- contrasts.fit(fit, contMatrix)
+  fit2 <- eBayes(fit2)
+  dmps <- topTable(fit2, num=Inf, coef=1, genelist=a)
+  b <- getBeta(x)
+  d <- b[row.names(b)%in%row.names(dmps),]
+  d <- d[row.names(dmps),]
+  pheno1 <- as.data.frame(pData(x))
+  row.names(pheno1) <- pheno1[,1]
+  md <- rowMeans(d[,colnames(d)%in%row.names(subset(pheno1, y ==       
+  levels(as.factor(y))[2]))]) - rowMeans(d[,colnames
+  (d)%in%row.names(subset(pheno1, y ==  levels(as.factor(y))[1]))])
+  dmps$meanDiff <- md
+  return(dmps)
+}
+```
+
+
+#################################################################
+# DMPs interaction
+#################################################################
+
+```{r}
+
+DMPsInt <- function(x,y,a) {
+  z <- getM(x)
+  a <- eval(noquote(a))
+  design <- model.matrix(~0+y, data=pData(x))
+  colnames(design) <- levels(factor(y))
+  fit <- lmFit(z, design)
+  m <- c(paste(levels(factor(y))[2],levels(factor(y))[1], sep = "-"), paste(levels(factor(y))[4],levels(factor(y))[3], 
+sep = "-"), paste(levels(factor(y))[4],levels(factor(y))[2], sep = "-"),paste(levels(factor(y))[3],levels(factor(y))
+[1], sep = "-"))
+  str2 <- paste(m,collapse = ",")
+  str1="makeContrasts(" 
+  str3=",levels=design)" 
+  strAll=paste(str1,str2,str3,sep="")
+  contMatrix <- eval(parse(text=strAll))
+  print(contMatrix)
+  fit2 <- contrasts.fit(fit, contMatrix)
+  fit2 <- eBayes(fit2)
+  dmps <- list(dmps_HC_M__HC_F= topTable(fit2, num=Inf, coef=1, genelist = a), dmps_IBS_M__IBS_F = topTable(fit2, 
+num=Inf, coef=2, genelist=a), dmps_IBS_M__HC_M = topTable(fit2, num=Inf, coef=3, genelist=a), dmps_IBS_F__HC_F= 
+topTable(fit2, num=Inf, coef=4, genelist=a))
+  pheno1 <- as.data.frame(pData(x))
+  row.names(pheno1) <- pheno1[,1]
+  b <- getBeta(x)
+  d<-list()
+  for (i in 1:4) {
+    d[[i]] <- b[row.names(b)%in%row.names(dmps[[i]]),]
+    d[[i]] <- d[[i]][row.names(dmps[[i]]),] 
+  }
+  dmps[[1]]$meanDiff <- rowMeans(d[[1]][,colnames(d[[1]])%in%row.names(subset(pheno1, y ==  levels(as.factor(y))[2]))]) 
+- rowMeans(d[[1]][,colnames(d[[1]])%in%row.names(subset(pheno1, y ==  levels(as.factor(y))[1]))])
+  dmps[[2]]$meanDiff <- rowMeans(d[[2]][,colnames(d[[2]])%in%row.names(subset(pheno1, y ==  levels(as.factor(y))[4]))]) 
+- rowMeans(d[[2]][,colnames(d[[2]])%in%row.names(subset(pheno1, y ==  levels(as.factor(y))[3]))])
+  dmps[[3]]$meanDiff <- rowMeans(d[[3]][,colnames(d[[3]])%in%row.names(subset(pheno1, y ==  levels(as.factor(y))[4]))]) 
+- rowMeans(d[[3]][,colnames(d[[3]])%in%row.names(subset(pheno1, y ==  levels(as.factor(y))[2]))])
+  dmps[[4]]$meanDiff <- rowMeans(d[[4]][,colnames(d[[4]])%in%row.names(subset(pheno1, y ==  levels(as.factor(y))[3]))]) 
+- rowMeans(d[[4]][,colnames(d[[4]])%in%row.names(subset(pheno1, y ==  levels(as.factor(y))[1]))])
+  return(dmps)
+}
+
+
+
+```
+
+##################################
+#Logit transform 
+###################################
+```{r}
+beta.scale <- function(x, n=0.98) ((x-0.5)*n) + 0.5
+beta.logit <- function(x, n=0.98) log(beta.scale(x,n))-log(1-beta.scale(x,n))
+md.y<-beta.logit(0.3)
+md.x<-beta.logit(0.1)
+
+```
+
+###################################
+#pubmed query
+###################################
+
+```{r}
+library('annotate')
+library('Biobase')
+library('XML')
+
+source("http://bioconductor.org/biocLite.R")
+biocLite("NCBI2R")
+library("mygene")
+xli <- c('BRCA1', 
+		'BRCA2', 
+		'SOX2', 
+		'MYC')
+
+res<-queryMany(xli, scopes='symbol', fields=c('entrezgene', 'go'),species='human')
+
+install.packages("C:/Users/swapnajoshi/Downloads/RISmed_2.1.5.tar.gz")
+library("RISmed")
+search_topic <- 'pain'
+search_query <- EUtilsSummary(search_topic, retmax=100, mindate=2000, maxdate=2015)
+summary(search_query)
+QueryId(search_query)
+
+id1<-pm.abstGrep("pain", absts)
+
+
+x <- pubmed("9695952","8325638","8422497")
+a <- xmlRoot(x)
+numAbst <- length(xmlChildren(a))
+absts <- list()
+for (i in 1:numAbst) {
+	absts[[i]] <- buildPubMedAbst(a[[i]])
+}
+
+library(devtools)
+install_github("ropensci/rentrez")
+library("rentrez")
+pubmed_search <- entrez_search(db = "pubmed", term = "bowel pain constipation")
+NCBI_data <- entrez_link(dbfrom = "pubmed", id = pubmed_search$ids, db = "all")
+x<-c(4988,3146,93109,123775,2565,90522,54551,9905,5138,4983)
+
+Write.Abstracts <- function(x){
+	
+	a<-IDs.1[[x]]
+	b<-pubmed(a)
+	c <- xmlRoot(b)
+	numAbst <- length(xmlChildren(c))
+	absts <- list()
+	for (i in 1:numAbst) {
+		absts[[i]] <- buildPubMedAbst(c[[i]])
+	}
+	pain <- pm.abstGrep("pain", absts)
+	colon <- pm.abstGrep("colon", absts)
+	bowel <- pm.abstGrep("bowel", absts)
+	
+	d <- absts[pain==TRUE|colon==TRUE|bowel==TRUE]
+	if(length(d)>0){
+		entrez <- names(IDs.1[x])
+		fname <- paste(entrez,".html")
+		pmAbst2HTML(d,filename=fname)     
+	}
+	Sys.sleep(15)
+}
+
+Write.Abstracts(c("26664542","26662657"))
+
+library(RCurl)
+query <- c("ge.pain" = "'gastrointestinal pain'")
+pub.efetch <- searchPubmed(query)
+ge.pain_any <- extractJournal(pub.efetch)
+
+getPMIDAnnot<-function(pmidlist) {
+	require(annotate)
+	require(XML)
+	print("Using annotate and XML to get info on each PMID")
+	pubmedRes<-xmlRoot(pubmed(pmidlist))
+	numAbst <- length(xmlChildren(pubmedRes))
+	absts <- list()
+	for (i in 1:numAbst) {
+		absts[[i]] <- buildPubMedAbst(pubmedRes[[i]])
+	}
+	
+	#unlist(lapply(absts, function(x) authors(x)[1]))
+	
+	## Write Output to PMIDInfo
+	PMIDInfo<-data.frame(matrix(NA, nrow=length(pmidlist)))
+	PMIDInfo$FirstAuthor= unlist(lapply(absts, function(x) authors(x)[1]))
+	PMIDInfo$Journal= unlist(lapply(absts, function(x) journal(x)[1]))
+	PMIDInfo$pubDate= unlist(lapply(absts, function(x) pubDate(x)[1]))
+	PMIDInfo$articleTitle= unlist(lapply(absts, function(x) articleTitle(x)[1]))
+	PMIDInfo$abstText= unlist(lapply(absts, function(x) abstText(x)[1]))
+	PMIDInfo$PubMedID= unlist(lapply(absts, function(x) pmid(x)[1]))
+	rownames(PMIDInfo) =PMIDInfo$PubMedID
+	PMIDInfo= PMIDInfo[,-1]
+	
+	#Res<-cbind(outMat, Total= apply(outMat, 1, sum), PMIDInfo[,c(5, 1,3,4,2)])
+	#Res$pubDate<-unlist(strsplit(Res$pubDate, " "))[seq(2, length(Res$pubDate)*2, 2)]
+	#names(Res)[10] ="Year"
+	#print(Res)
+	
+	# print(PMIDInfo[1:2,])
+	return(PMIDInfo)
+}
+
+
+library(RISmed)
+pubmed.search("irritable bowel syndrome",limits,save=TRUE)
+
+searchPubmed <- function(query.term) {
+	# change spaces to + in query
+	query.gsub <- gsub(" ", "+", query.term)
+	# change single-quotes to URL-friendly %22
+	query.gsub <- gsub("'","%22", query.gsub)
+	# Perform search and save history, this will save PMIDS in history
+	pub.esearch <- getURL(paste("http://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=", 		query.gsub, "&usehistory=y", sep = ""))
+	# Parse esearch XML
+	pub.esearch <- xmlTreeParse(pub.esearch, asText = TRUE)
+	# Count number of hits (super assign)
+	pub.count <<- as.numeric(xmlValue(pub.esearch[["doc"]][["eSearchResult"]][["Count"]]))
+	# Save WebEnv-string, it contains "links" to all articles in my search
+	pub.esearch <- xmlValue(pub.esearch[["doc"]][["eSearchResult"]][["WebEnv"]])
+	# Show how many articles that's being downloaded
+	cat("Searching (downloading", pub.count, "articles)\n")
+	
+	## We need to batch download, since efetch will cap at 10k articles ##
+	# Start at 0
+	RetStart <- 0
+	# End at 10k
+	RetMax <- 10000
+	# Calculate how many itterations will be needed
+	Runs <- (pub.count %/% 10000) + 1
+	# Create empty object
+	pub.efetch <- NULL
+	# Loop to batch download
+	for (i in 1:Runs) { 
+		# Download XML based on hits saved in pub.esearch (WebEnv)
+		x <- getURL(paste("http://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&WebEnv=",
+						pub.esearch,"&query_key=1&retmode=xml&retstart=", RetStart, "&retmax=", 
+RetMax, sep = ""))
+		# Remove XML declarations, else it wont parse correctly later, since different gets are being pasted 
+together. 
+		# This is probably quick-and-dirty, perhaps it could be done more elegantly with the XML-package
+		x <- gsub("<.xml version=\"1\\.0\".>\n<!DOCTYPE PubmedArticleSet PUBLIC \"-//NLM//DTD PubMedArticle, 
+1st January
+						2013//EN\"\"http://www\\.ncbi\\.nlm\\.nih\
+\.gov/corehtml/query/DTD/pubmed_130101\\.dtd\">\n", "", x)
+		x <- gsub("<PubmedArticleSet>\n", "", x)
+		x <- gsub("\n</PubmedArticleSet>\n", "", x)
+		# Add data to previous downloads
+		pub.efetch <- paste(pub.efetch, x, sep="")
+		# Increase range for next batch
+		RetStart <- RetStart + 10000
+		RetMax <- RetMax + 10000
+	}
+	# Add tags to create valid XML
+	pub.efetch <- paste("<PubmedArticleSet>\n",pub.efetch,"</PubmedArticleSet>\n")
+	# Print that download is completed
+	cat("Completed download from PubMed.\n")
+	# Return XML
+	return(pub.efetch)
+}
+
+# Function to extract journal name from individual article
+extractJournal <- function(query.term = query) {
+	# Parse XML into XML Tree
+	xml.data <- xmlTreeParse(pub.efetch, useInternalNodes = TRUE)
+	# Use xpathSApply to extract Journal name
+	journal <- xpathSApply(xml.data, "//PubmedArticle/MedlineCitation/MedlineJournalInfo/MedlineTA", xmlValue)
+	# Show how many journals that were extracted
+	cat("Extracted ", length(journal), " hits (",(length(journal)/pub.count)*100," %) from a total of ",
+			pub.count," hits. For query named: ", query.term,"\n", sep="")
+	# Create data frame with journal counts
+	journal <- data.frame(count(journal))
+	# Calculcate percent
+	journal$percent <- journal$freq / pub.count
+	# return data
+	return(journal)
+}
+```
+## box plot function
+```{r}
+library(gridExtra) 
+grid.arrange(for(i in 4:11){
+  for (j in 1:3){
+    eval(noquote(paste('i','j',sep ="_"))) <- ggplot(df3, aes(as.factor(df3[,i]),df3[,j]))
+  eval(noquote(paste('i','j',sep ="_"))) + geom_boxplot(outlier.color = NA) + geom_jitter() + labs(x = colnames(df3)[i], y = (colnames(df3)[j]))
+  }
+}, ncol = 4)
+
+
+```
+
+```{r}
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  require(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+```
+
+```{r}
+aov_p <- function (modelobject) {
+    p <- modelobject[[1]]$'Pr(>F)'[1]
+    return(p)
+}
+
+t_p <- function (modelobject) {
+     p <- modelobject$p.value
+    return(p)
+}
+
+
+w_p <- function (modelobject) {
+     p <- modelobject$p.value
+    return(p)
+}
+
+k_p <- function (modelobject) {
+     p <- modelobject$p.value
+    return(p)
+}
+```
+
+```{r}
+labeledHeatmap_mod <- function (Matrix, xLabels, yLabels = NULL, xSymbols = NULL, ySymbols = NULL, 
+    colorLabels = NULL, xColorLabels = FALSE, yColorLabels = FALSE, 
+    checkColorsValid = TRUE, invertColors = FALSE, setStdMargins = TRUE, 
+    xLabelsPosition = "bottom", xLabelsAngle = 45, xLabelsAdj = 1, 
+    yLabelsPosition = "left", xColorWidth = 2 * strheight("M"), 
+    yColorWidth = 2 * strwidth("M"), xColorOffset = strheight("M")/3, 
+    yColorOffset = strwidth("M")/3, colors = NULL, naColor = "grey", 
+    textMatrix = NULL, cex.text = NULL, textAdj = c(0.5, 0.5), 
+    cex.lab = NULL, cex.lab.x = cex.lab, cex.lab.y = cex.lab, 
+    colors.lab.x = 1, colors.lab.y = 1, font.lab.x = 0.8, font.lab.y = 0.8, 
+    bg.lab.x = NULL, bg.lab.y = NULL, x.adj.lab.y = 1, plotLegend = TRUE, 
+    keepLegendSpace = plotLegend, verticalSeparator.x = NULL, 
+    verticalSeparator.col = 1, verticalSeparator.lty = 1, verticalSeparator.lwd = 1, 
+    verticalSeparator.ext = 0, horizontalSeparator.y = NULL, 
+    horizontalSeparator.col = 1, horizontalSeparator.lty = 1, 
+    horizontalSeparator.lwd = 1, horizontalSeparator.ext = 0, 
+    ...) 
+{
+    textFnc = match.fun("text")
+    if (!is.null(colorLabels)) {
+        xColorLabels = colorLabels
+        yColorLabels = colorLabels
+    }
+    if (is.null(yLabels) & (!is.null(xLabels)) & (dim(Matrix)[1] == 
+        dim(Matrix)[2])) 
+        yLabels = xLabels
+    nCols = ncol(Matrix)
+    nRows = nrow(Matrix)
+    if (checkColorsValid) {
+        xValidColors = !is.na(match(substring(xLabels, 3), colors()))
+        yValidColors = !is.na(match(substring(yLabels, 3), colors()))
+    }
+    else {
+        xValidColors = rep(TRUE, length(xLabels))
+        yValidColors = rep(TRUE, length(yLabels))
+    }
+    if (sum(xValidColors) > 0) 
+        xColorLabInd = c(1:length(xLabels))[xValidColors]
+    if (sum(!xValidColors) > 0) 
+        xTextLabInd = c(1:length(xLabels))[!xValidColors]
+    if (sum(yValidColors) > 0) 
+        yColorLabInd = c(1:length(yLabels))[yValidColors]
+    if (sum(!yValidColors) > 0) 
+        yTextLabInd = c(1:length(yLabels))[!yValidColors]
+    if (setStdMargins) {
+        if (xColorLabels & yColorLabels) {
+            par(mar = c(2, 2, 3, 5) + 0.2)
+        }
+        else {
+            par(mar = c(7, 7, 3, 5) + 0.2)
+        }
+    }
+    xLabPos = charmatch(xLabelsPosition, c("bottom", "top"))
+    if (is.na(xLabPos)) 
+        stop("Argument 'xLabelsPosition' must be (a unique abbreviation of) 'bottom', 'top'")
+    yLabPos = charmatch(yLabelsPosition, c("left", "right"))
+    if (is.na(yLabPos)) 
+        stop("Argument 'yLabelsPosition' must be (a unique abbreviation of) 'left', 'right'")
+    if (is.null(colors)) 
+        colors = heat.colors(30)
+    if (invertColors) 
+        colors = .reverseVector(colors)
+    labPos = .heatmapWithLegend(Matrix, signed = FALSE, colors = colors, 
+        naColor = naColor, cex.legend = cex.lab, plotLegend = plotLegend, 
+        keepLegendSpace = keepLegendSpace, ...)
+    nxlabels = length(xLabels)
+    plotbox = labPos$box
+    xmin = plotbox[1]
+    xmax = plotbox[2]
+    ymin = plotbox[3]
+    yrange = plotbox[4] - ymin
+    ymax = plotbox[4]
+    xrange = xmax - xmin
+    xLeft = labPos$xLeft
+    xRight = labPos$xRight
+    yTop = labPos$yTop
+    yBot = labPos$yBot
+    xspacing = labPos$xMid[2] - labPos$xMid[1]
+    yspacing = abs(labPos$yMid[2] - labPos$yMid[1])
+    nylabels = length(yLabels)
+    offsetx = .extend(xColorOffset, nCols)
+    offsety = .extend(yColorOffset, nRows)
+    xColW = xColorWidth
+    yColW = yColorWidth
+    textOffsetY = strheight("M") * cos(xLabelsAngle/180 * pi)
+    if (any(xValidColors)) 
+        offsetx = offsetx + xColW
+    if (any(yValidColors)) 
+        offsety = offsety + yColW
+    extension.left = par("mai")[2] * par("cxy")[1]/par("cin")[1]
+    extension.right = par("mai")[4] * par("cxy")[1]/par("cin")[1]
+    extension.bottom = par("mai")[1] * par("cxy")[2]/par("cin")[2] - 
+        offsetx
+    extension.top = par("mai")[3] * par("cxy")[2]/par("cin")[2] - 
+        offsetx
+    figureBox = par("usr")
+    figXrange = figureBox[2] - figureBox[1]
+    figYrange = figureBox[4] - figureBox[3]
+    if (!is.null(bg.lab.x)) {
+        bg.lab.x = .extend(bg.lab.x, nCols)
+        if (xLabPos == 1) {
+            y0 = ymin
+            ext = extension.bottom
+            sign = 1
+        }
+        else {
+            y0 = ymax
+            ext = extension.top
+            sign = -1
+        }
+        figureDims = par("pin")
+        angle = xLabelsAngle/180 * pi
+        ratio = figureDims[1]/figureDims[2] * figYrange/figXrange
+        ext.x = -sign * ext * 1/tan(angle)/ratio
+        ext.y = sign * ext * sign(sin(angle))
+        offset = (sum(xValidColors) > 0) * xColW + offsetx + 
+            textOffsetY
+        for (c in 1:nCols) polygon(x = c(xLeft[c], xLeft[c], 
+            xLeft[c] + ext.x, xRight[c] + ext.x, xRight[c], xRight[c]), 
+            y = c(y0, y0 - sign * offset[c], y0 - sign * offset[c] - 
+                ext.y, y0 - sign * offset[c] - ext.y, y0 - sign * 
+                offset[c], y0), border = bg.lab.x[c], col = bg.lab.x[c], 
+            xpd = TRUE)
+    }
+    if (!is.null(bg.lab.y)) {
+        bg.lab.y = .extend(bg.lab.y, nRows)
+        reverseRows = TRUE
+        if (reverseRows) {
+            bg.lab.y = rev(bg.lab.y)
+        }
+        if (yLabPos == 1) {
+            xl = xmin - extension.left
+            xr = xmin
+        }
+        else {
+            xl = xmax
+            xr = xmax + extension.right
+        }
+        for (r in 1:nRows) rect(xl, yBot[r], xr, yTop[r], col = bg.lab.y[r], 
+            border = bg.lab.y[r], xpd = TRUE)
+    }
+    colors.lab.x = .extend(colors.lab.x, nCols)
+    font.lab.x = .extend(font.lab.x, nCols)
+    if (sum(!xValidColors) > 0) {
+        xLabYPos = if (xLabPos == 1) 
+            ymin - offsetx - textOffsetY
+        else ymax + offsetx + textOffsetY
+        if (is.null(cex.lab)) 
+            cex.lab = 1
+        mapply(textFnc, x = labPos$xMid[xTextLabInd], y = xLabYPos, 
+            labels = xLabels[xTextLabInd], col = colors.lab.x[xTextLabInd], 
+            font = font.lab.x[xTextLabInd], MoreArgs = list(srt = xLabelsAngle, 
+                adj = xLabelsAdj, xpd = TRUE, cex = cex.lab.x))
+    }
+    if (sum(xValidColors) > 0) {
+        baseY = if (xLabPos == 1) 
+            ymin - offsetx
+        else ymax + offsetx
+        deltaY = if (xLabPos == 1) 
+            xColW
+        else -xColW
+        rect(xleft = labPos$xMid[xColorLabInd] - xspacing/2, 
+            ybottom = baseY[xColorLabInd], xright = labPos$xMid[xColorLabInd] + 
+                xspacing/2, ytop = baseY[xColorLabInd] + deltaY, 
+            density = -1, col = substring(xLabels[xColorLabInd], 
+                3), border = substring(xLabels[xColorLabInd], 
+                3), xpd = TRUE)
+        if (!is.null(xSymbols)) 
+            mapply(textFnc, x = labPos$xMid[xColorLabInd], y = baseY[xColorLabInd] - 
+                textOffsetY - sign(deltaY) * strwidth("M")/3, 
+                labels = xSymbols[xColorLabInd], col = colors.lab.x[xColorLabInd], 
+                font = font.lab.x[xColorLabInd], MoreArgs = list(adj = xLabelsAdj, 
+                  xpd = TRUE, srt = xLabelsAngle, cex = cex.lab.x))
+    }
+    x.adj.lab.y = .extend(x.adj.lab.y, nRows)
+    if (yLabPos == 1) {
+        marginWidth = par("mai")[2]/par("pin")[1] * xrange
+    }
+    else {
+        marginWidth = par("mai")[4]/par("pin")[1] * xrange
+    }
+    xSpaceForYLabels = marginWidth - 2 * strwidth("M")/3 - ifelse(yValidColors, 
+        yColW, 0)
+    xPosOfYLabels.relative = xSpaceForYLabels * (1 - x.adj.lab.y) + 
+        offsety
+    colors.lab.y = .extend(colors.lab.y, nRows)
+    font.lab.y = .extend(font.lab.y, nRows)
+    if (sum(!yValidColors) > 0) {
+        if (is.null(cex.lab)) 
+            cex.lab = 1
+        if (yLabPos == 1) {
+            x = xmin - strwidth("M")/3 - xPosOfYLabels.relative[yTextLabInd]
+            adj = x.adj.lab.y[yTextLabInd]
+        }
+        else {
+            x = xmax + strwidth("M")/3 + xPosOfYLabels.relative[yTextLabInd]
+            adj = 1 - x.adj.lab.y[yTextLabInd]
+        }
+        mapply(textFnc, y = labPos$yMid[yTextLabInd], labels = yLabels[yTextLabInd], 
+            adj = lapply(adj, c, 0.5), x = x, col = colors.lab.y[yTextLabInd], 
+            font = font.lab.y[yTextLabInd], MoreArgs = list(srt = 0, 
+                xpd = TRUE, cex = cex.lab.y))
+    }
+    if (sum(yValidColors) > 0) {
+        if (yLabPos == 1) {
+            xl = xmin - offsety
+            xr = xmin - offsety + yColW
+            xtext = xmin - strwidth("M")/3 - xPosOfYLabels.relative[yColorLabInd]
+            adj = x.adj.lab.y[yColorLabInd]
+        }
+        else {
+            xl = xmax + offsety - yColW
+            xr = xmax + offsety
+            xtext = xmin + strwidth("M")/3 + xPosOfYLabels.relative[yColorLabInd]
+            adj = 1 - x.adj.lab.y[yColorLabInd]
+        }
+        rect(xleft = xl[yColorLabInd], ybottom = rev(labPos$yMid[yColorLabInd]) - 
+            yspacing/2, xright = xr[yColorLabInd], ytop = rev(labPos$yMid[yColorLabInd]) + 
+            yspacing/2, density = -1, col = substring(rev(yLabels[yColorLabInd]), 
+            3), border = substring(rev(yLabels[yColorLabInd]), 
+            3), xpd = TRUE)
+        if (!is.null(ySymbols)) 
+            mapply(textFnc, y = labPos$yMid[yColorLabInd], labels = ySymbols[yColorLabInd], 
+                adj = lapply(adj, c, 0.5), x = xtext, col = colors.lab.y[yColorLabInd], 
+                font = font.lab.y[yColorLabInd], MoreArgs = list(srt = 0, 
+                  xpd = TRUE, cex = cex.lab.y))
+    }
+    if (length(verticalSeparator.x) > 0) {
+        nLines = length(verticalSeparator.x)
+        vs.col = .extend(verticalSeparator.col, nLines)
+        vs.lty = .extend(verticalSeparator.lty, nLines)
+        vs.lwd = .extend(verticalSeparator.lwd, nLines)
+        vs.ext = .extend(verticalSeparator.ext, nLines)
+        if (any(verticalSeparator.x < 0 | verticalSeparator.x > 
+            nCols)) 
+            stop("If given. 'verticalSeparator.x' must all be between 0 and the number of columns.")
+        x.lines = ifelse(verticalSeparator.x > 0, labPos$xRight[verticalSeparator.x], 
+            labPos$xLeft[1])
+        for (l in 1:nLines) lines(rep(x.lines[l], 2), c(ymin, 
+            ymax), col = vs.col[l], lty = vs.lty[l], lwd = vs.lwd[l])
+        angle = xLabelsAngle/180 * pi
+        if (angle == 0) 
+            angle = pi/2
+        if (xLabelsPosition == "bottom") {
+            sign = 1
+            y0 = ymin
+            ext = extension.bottom
+        }
+        else {
+            sign = -1
+            y0 = ymax
+            ext = extension.top
+        }
+        figureDims = par("pin")
+        ratio = figureDims[1]/figureDims[2] * figYrange/figXrange
+        ext.x = -sign * ext * 1/tan(angle)/ratio
+        ext.y = sign * ext * sign(sin(angle))
+        offset = (sum(xValidColors) > 0) * xColW + offsetx + 
+            textOffsetY
+        for (l in 1:nLines) lines(c(x.lines[l], x.lines[l], x.lines[l] + 
+            vs.ext[l] * ext.x[l]), c(y0, y0 - sign * offset[l], 
+            y0 - sign * offset[l] - vs.ext[l] * ext.y[l]), col = vs.col[l], 
+            lty = vs.lty[l], lwd = vs.lwd[l], xpd = TRUE)
+    }
+    if (length(horizontalSeparator.y) > 0) {
+        if (any(horizontalSeparator.y < 0 | horizontalSeparator.y > 
+            nRows)) 
+            stop("If given. 'horizontalSeparator.y' must all be between 0 and the number of rows.")
+        reverseRows = TRUE
+        if (reverseRows) {
+            horizontalSeparator.y = nRows - horizontalSeparator.y + 
+                1
+            y.lines = ifelse(horizontalSeparator.y <= nRows, 
+                labPos$yBot[horizontalSeparator.y], labPos$yTop[nRows])
+        }
+        else {
+            y.lines = ifelse(horizontalSeparator.y > 0, labPos$yBot[horizontalSeparator.y], 
+                labPos$yTop[1])
+        }
+        nLines = length(horizontalSeparator.y)
+        vs.col = .extend(horizontalSeparator.col, nLines)
+        vs.lty = .extend(horizontalSeparator.lty, nLines)
+        vs.lwd = .extend(horizontalSeparator.lwd, nLines)
+        vs.ext = .extend(horizontalSeparator.ext, nLines)
+        for (l in 1:nLines) {
+            if (yLabPos == 1) {
+                xl = xmin - vs.ext[l] * extension.left
+                xr = xmax
+            }
+            else {
+                xl = xmin
+                xr = xmax + vs.ext[l] * extension.right
+            }
+            lines(c(xl, xr), rep(y.lines[l], 2), col = vs.col[l], 
+                lty = vs.lty[l], lwd = vs.lwd[l], xpd = TRUE)
+        }
+    }
+    if (!is.null(textMatrix)) {
+        if (is.null(cex.text)) 
+            cex.text = par("cex")
+        if (is.null(dim(textMatrix))) 
+            if (length(textMatrix) == prod(dim(Matrix))) 
+                dim(textMatrix) = dim(Matrix)
+        if (!isTRUE(all.equal(dim(textMatrix), dim(Matrix)))) 
+            stop("labeledHeatmap: textMatrix was given, but has dimensions incompatible with Matrix.")
+        for (rw in 1:dim(Matrix)[1]) for (cl in 1:dim(Matrix)[2]) {
+            text(labPos$xMid[cl], labPos$yMid[rw], as.character(textMatrix[rw, 
+                cl]), xpd = TRUE, cex = cex.text, adj = textAdj)
+        }
+    }
+    axis(1, labels = FALSE, tick = FALSE)
+    axis(2, labels = FALSE, tick = FALSE)
+    axis(3, labels = FALSE, tick = FALSE)
+    axis(4, labels = FALSE, tick = FALSE)
+    invisible(labPos)
+}
+```
+

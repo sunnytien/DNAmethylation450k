@@ -1,0 +1,331 @@
+---
+title: "Subtypes in IBS"
+author: "Swapna Mahurkar-Joshi"
+date: "August 14, 2017"
+output: html_document
+---
+
+# PBMC
+
+```{r}
+load("temp/functional_norm/methBioconductorWorkflow/GRsetPbmcColFunFlt.Rda")
+GRsetPbmcFunFlt.ibs <- GRsetPbmcFunFlt[,colnames(GRsetPbmcFunFlt[,pData(GRsetPbmcFunFlt)$Dx == "IBS"])]
+metDat_p<- read.csv("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/data/rawdata/Metadata_pbmc_methylation.csv", row.names = 1)
+metDat_p.ibs <- subset(metDat_p, metDat_p$Group == 2)
+colnames(GRsetPbmcFunFlt.ibs) <- substr(colnames(GRsetPbmcFunFlt.ibs),1,5)
+metDat_p.ibs <- metDat_p[row.names(metDat_p)%in%colnames(GRsetPbmcFunFlt.ibs),]
+metDat_p.ibs <- metDat_p.ibs[colnames(GRsetPbmcFunFlt.ibs),]
+
+GRsetColFunFlt.ibs <- GRsetColFunFlt[,colnames(GRsetColFunFlt[,pData(GRsetColFunFlt)$Dx == "IBS"])]
+GRsetColFunFlt.hc <- GRsetColFunFlt[,colnames(GRsetColFunFlt[,pData(GRsetColFunFlt)$Dx == "HC"])]
+metDat_c<- read.csv("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/data/rawdata/Metadata_colon_methylation.csv", row.names = 1)
+metDat_c.ibs <- subset(metDat_c, metDat_c$Group == 2)
+colnames(GRsetColFunFlt.ibs) <- substr(colnames(GRsetColFunFlt.ibs),1,5)
+metDat_c.ibs <- metDat_c[row.names(metDat_c)%in%colnames(GRsetColFunFlt.ibs),]
+metDat_c.ibs <- metDat_c.ibs[colnames(GRsetColFunFlt.ibs),]
+
+betaVals_p <- as.data.frame(getBeta(GRsetPbmcFunFlt.ibs))
+betaVals_c <- as.data.frame(getBeta(GRsetColFunFlt.ibs))
+```
+
+```{r setup}
+# Set working directory outside the chunks
+knitr::opts_knit$set(root.dir = normalizePath("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/"))
+```
+
+# PBMC subgroups within IBS
+```{r}
+library(ConsensusClusterPlus)
+# select 5000 genes with highest median absolute deviation (MAD)
+mads=apply(betaVals_p,1,mad)
+df_p=betaVals_p[rev(order(mads))[1:5000],]; dim(df_p)
+
+
+# Running ConsensusClusterPlus: we select 80% item resampling (pItem), 80% gene resampling (pFeature), a maximum evalulated k of 6 so that cluster counts of 2,3,4,5,6 are evaluated (maxK), 50 resamplings (reps), agglomerative heirarchical clustering2algorithm  (clusterAlg)  upon  1-  Pearson  correlation  distances  (distance).  We also used a specific random seed so that this example is repeatable
+
+title="temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/pbmc/concensusClustering_hierarchical/"
+results = ConsensusClusterPlus(as.matrix(df_p),maxK=6,reps=500,pItem=0.8,pFeature=1, title=title,clusterAlg="hc",distance="pearson",seed=2210,plot="png")
+
+title="temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/pbmc/concensusClustering_hierarchical/consensus_plot"
+icl = calcICL(results,title=title, plot="png")
+```
+#######################################################################################
+```{r setup}
+# Set working directory outside the chunks
+knitr::opts_knit$set(root.dir = normalizePath("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/"))
+```
+
+# Colon subgroups within IBS
+```{r}
+library(ConsensusClusterPlus)
+# select 5000 genes with highest median absolute deviation (MAD)
+mads=apply(betaVals_c,1,mad)
+df_c=betaVals_c[rev(order(mads))[1:5000],]; dim(df_c)
+
+# Running ConsensusClusterPlus: we select 80% item resampling (pItem), 80% gene resampling (pFeature), a maximum evalulated k of 6 so that cluster counts of 2,3,4,5,6 are evaluated (maxK), 500 resamplings (reps), agglomerative heirarchical clustering2algorithm  (clusterAlg)  upon  1-  Pearson  correlation  distances  (distance).  We also used a specific random seed so that this example is repeatable
+
+library(cluster)
+dianaHook = function(this_dist,k){
+tmp = diana(this_dist,diss=TRUE)
+assignment = cutree(tmp,k)
+return(assignment)
+}
+
+# pam clustering
+title="temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/concensusClustering_pam/"
+results = ConsensusClusterPlus(as.matrix(df_c),maxK=6,reps=500,pItem=0.8,pFeature=1, title=title,clusterAlg="pam",distance="pearson",seed=2210,plot="png")
+
+# Select heirarchical clustering 
+pam_clu2 <- results[[2]]$consensusClass; write.csv(pam_clu2, file= paste("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/",title,"/pam_clu2.csv", sep = ""))
+pam_clu3 <- results[[3]]$consensusClass; write.csv(pam_clu2, file= paste("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/",title,"/pam_clu3.csv", sep = ""))
+
+title="temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/concensusClustering_pam/consensus_plot"
+icl = calcICL(results,title=title, plot="png")
+#################################################
+# dianaHook clustering
+title="temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/concensusClustering_dianaHook/"
+results = ConsensusClusterPlus(as.matrix(df_c),maxK=6,reps=500,pItem=0.8,pFeature=1, title=title,clusterAlg="dianaHook",distance="pearson",seed=2210,plot="png")
+
+# Select heirarchical clustering 
+dianaHook_clu2 <- results[[2]]$consensusClass; write.csv(dianaHook_clu2, file= paste("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/",title,"/dianaHook_clu2.csv", sep = ""))
+dianaHook_clu3 <- results[[3]]$consensusClass; write.csv(dianaHook_clu2, file= paste("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/",title,"/dianaHook_clu3.csv", sep = ""))
+
+title="temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/concensusClustering_dianaHook/consensus_plot"
+icl = calcICL(results,title=title, plot="png")
+
+##################################################
+# hierarchical clustering
+title="temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/concensusClustering_hierarchical/"
+results = ConsensusClusterPlus(as.matrix(df_c),maxK=6,reps=500,pItem=0.8,pFeature=1, title=title,clusterAlg="hc",distance="pearson",seed=2210,plot="png")
+
+# Select heirarchical clustering 
+hierarchical_clu2 <- results[[2]]$consensusClass; write.csv(hierarchical_clu2, file= paste("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/",title,"/hierarchical_clu2.csv", sep = ""))
+hierarchical_clu3 <- results[[3]]$consensusClass; write.csv(hierarchical_clu2, file= paste("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/",title,"/hierarchical_clu3.csv", sep = ""))
+
+title="temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/concensusClustering_hierarchical/consensus_plot"
+icl = calcICL(results,title=title, plot="png")
+###################################################
+# kmeans clustering
+title="temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/concensusClustering_kmeans/"
+results = ConsensusClusterPlus(as.matrix(df_c),maxK=6,reps=500,pItem=0.8,pFeature=1, title=title,clusterAlg="km",distance="euclidean",seed=2210,plot="png")
+
+# Select heirarchical clustering 
+kmeans_clu2 <- results[[2]]$consensusClass; write.csv(kmeans_clu2, file= paste("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/",title,"/kmeans_clu2.csv", sep = ""))
+kmeans_clu3 <- results[[3]]$consensusClass; write.csv(kmeans_clu2, file= paste("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/",title,"/kmeans_clu3.csv", sep = ""))
+
+title="temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/concensusClustering_kmeans/consensus_plot"
+icl = calcICL(results,title=title, plot="png")
+
+consensusCluMemb <- cbind(pam_clu2, pam_clu3,dianaHook_clu2, dianaHook_clu3, hierarchical_clu2, hierarchical_clu3, kmeans_clu2, kmeans_clu3)
+colnames(consensusCluMemb) <- c("pam_clu2", "pam_clu3","dianaHook_clu2", "dianaHook_clu3", "hierarchical_clu2", "hierarchical_clu3", "kmeans_clu2", "kmeans_clu3")
+write.csv(consensusCluMemb, file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/consensusCluMemb.csv")
+```
+
+# Association of clinical characteristics with consensus clusters
+```{r}
+consensusCluMemb <- read.csv("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/consensusCluMemb.csv", row.names =1)
+metDat_c<- read.csv("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/data/rawdata/Metadata_colon_methylation.csv", row.names = 1)
+row.names(consensusCluMemb) <- substr(row.names(consensusCluMemb),1,5)
+df1 <- metDat_c[row.names(metDat_c)%in%row.names(consensusCluMemb),]; dim(df1)
+df1 <- df1[row.names(consensusCluMemb),]
+
+match(row.names(consensusCluMemb), row.names(df1))
+df2 <- cbind(df1,consensusCluMemb)
+
+fisherTestCat <- cbind(apply(df2[,c(29:36)],2, function(x,y) {fisher.test(x,y)$p.value}, df2[,1]), apply(df2[,c(29:36)],2, function(x,y) {fisher.test(x,y)$p.value}, df2[,3])); colnames(fisherTestCat) <-  c( "Bowel habit","Sex")
+# fisherTestCat
+#                   Bowel habit        Sex
+# pam_clu2            0.7153264 0.20143006
+# pam_clu3            0.4056311 0.05760948
+# dianaHook_clu2      0.8900909 0.08290136
+# dianaHook_clu3      0.9993290 0.09648662
+# hierarchical_clu2   0.8391585 0.13736455
+# hierarchical_clu3   0.9749671 0.14651939
+# kmeans_clu2         0.8734841 0.06433540
+# kmeans_clu3         0.7806369 0.01743314
+
+df3<-df2[,-c(1,2,3,22,23,24,26,28)]
+head(df3)
+
+aovTestClin <- cbind(apply(df3[,c(1:20)],2, function(x,y) {summary(aov(x~y))[[1]][["Pr(>F)"]][1]}, 
+                           df3[,21]), apply(df3[,c(1:20)],2, function(x,y) {summary(aov(x~ y))[[1]][["Pr(>F)"]][1]}, df3[,22]),apply(df3[,c(1:20)],2, function(x,y) {summary(aov(x~y))[[1]][["Pr(>F)"]][1]}, df3[,23]),apply(df3[,c(1:20)],2, function(x,y) {summary(aov(x~y))[[1]][["Pr(>F)"]][1]}, df3[,24]),apply(df3[,c(1:20)],2, function(x,y) {summary(aov(x~y))[[1]][["Pr(>F)"]][1]}, df3[,25]),apply(df3[,c(1:20)],2, function(x,y) {summary(aov(x~y))[[1]][["Pr(>F)"]][1]}, df3[,26]),apply(df3[,c(1:20)],2, function(x,y) {summary(aov(x~y))[[1]][["Pr(>F)"]][1]}, df3[,27]), apply(df3[,c(1:20)],2, function(x,y) {summary(aov(x~y))[[1]][["Pr(>F)"]][1]}, df3[,28])); 
+colnames(aovTestClin) <-  colnames(df3)[21:28]
+library(knitr)
+kable(round(aovTestClin,3))
+write.csv(aovTestClin, file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/aovTestClin.csv")
+
+df3<-df2[,-c(1,2,22,23,24,26,28)]
+# controling for sex, age, BMI
+
+lmTestClin <- cbind(apply(df3[,c(4:21)],2, function(x,y,z,a) {summary(lm(x~y+z+a))[[4]][2,4]},df3[,22],df3[,1],df3[,2]), apply(df3[,c(4:21)],2, function(x,y,z,a,b) {summary(lm(x~y+z+a))[[4]][2,4]},df3[,23],df3[,1],df3[,2]),
+apply(df3[,c(4:21)],2, function(x,y,z,a) {summary(lm(x~y+z+a))[[4]][2,4]},df3[,24],df3[,1],df3[,2]),
+apply(df3[,c(4:21)],2, function(x,y,z,a) {summary(lm(x~y+z+a))[[4]][2,4]},df3[,25],df3[,1],df3[,2]), apply(df3[,c(4:21)],2, function(x,y,z,a) {summary(lm(x~y+z+a))[[4]][2,4]},df3[,26],df3[,1],df3[,2]),
+apply(df3[,c(4:21)],2, function(x,y,z,a) {summary(lm(x~y+z+a))[[4]][2,4]},df3[,27],df3[,1],df3[,2]),
+apply(df3[,c(4:21)],2, function(x,y,z,a) {summary(lm(x~y+z+a))[[4]][2,4]},df3[,28],df3[,1],df3[,2]),
+apply(df3[,c(4:21)],2, function(x,y,z,a) {summary(lm(x~y+z+a))[[4]][2,4]},df3[,29],df3[,1],df3[,2])); 
+colnames(lmTestClin) <-  colnames(df3)[22:29]
+library(knitr)
+kable(round(lmTestClin,3))
+
+
+```
+
+```{r}
+library(ggplot2)
+
+df3[,c(21:28)] <- apply(df3[,c(21:28)],2,as.factor)
+
+library(ggplot2)
+library(cowplot)
+
+for (i in 1:20)  local({
+  y <- df3[, i]
+  test <- t.test(y ~ df3$pam_clu2)
+  pvalue <- test$p.value
+  pvalueformatted <- format(pvalue, digits=3, nsmall=1.5)
+  g <- ggplot(df3, aes(x=df3$pam_clu2, y=y))    + geom_boxplot(outlier.color = NA) + geom_jitter() + labs(x = "pam_2Clu", y = colnames(df3)[i]) +  geom_text(aes(label = paste(" p = ", pvalueformatted), x =1.5, y = max(y, na.rm = TRUE)+ (max(y, na.rm = TRUE))/5) ,  na.rm=TRUE)
+  print(i)
+  print(g)
+  assign(colnames(df3)[i], g, pos =1) #generate an object for each plot
+     })
+# paste(eval(noquote(colnames(metDat_c.ibs1))),collapse = ","), ncol = 4)
+
+ggsave("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/plots_clin_pam2clu_col.png",width = 9, height = 8,dpi = 220, units = "in",plot_grid(Age,BMI,BSQ_OverallSx,BSQ_AbdPain,BSQ_Bloating,BSQ_UsualSeverity,ETI_General_Score,ETI_Physical_Score,ETI_Emotional_Score,ETI_Sexual_Score,ETI_Total_Score,ACE_Score,VSI_Score,PSS_Score,PHQ_Score,PHQ_Score_noIBSQs,PHQ_Score_noGIQs,IBSSS_Severity,HAD_Anxiety,HAD_Depression, ncol = 5))
+# the above names obtained from:
+  noquote(paste0(noquote(colnames(df3[,c(1:20)])),collapse = ","))
+
+  ########################################
+for (i in 1:20)  local({
+  y <- df3[, i]
+  test <- aov(y ~ df3$pam_clu3)
+  pvalue <- summary(test)[[1]][["Pr(>F)"]][1]
+  pvalueformatted <- format(pvalue, digits=3, nsmall=1.5)
+  g <- ggplot(df3, aes(x=df3$pam_clu3, y=y))    + geom_boxplot(outlier.color = NA) + geom_jitter() + labs(x = "pam_3Clu", y = colnames(df3)[i]) +  geom_text(aes(label = paste(" p = ", pvalueformatted), x =1.5, y = max(y, na.rm = TRUE)+ (max(y, na.rm = TRUE))/5) ,  na.rm=TRUE)
+  print(i)
+  print(g)
+  assign(colnames(df3)[i], g, pos =1) #generate an object for each plot
+     })
+# paste(eval(noquote(colnames(metDat_c.ibs1))),collapse = ","), ncol = 4)
+
+ggsave("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/plots_clin_pam3clu_col.png",width = 9, height = 8,dpi = 210, units = "in",plot_grid(Age,BMI,BSQ_OverallSx,BSQ_AbdPain,BSQ_Bloating,BSQ_UsualSeverity,ETI_General_Score,ETI_Physical_Score,ETI_Emotional_Score,ETI_Sexual_Score,ETI_Total_Score,ACE_Score,VSI_Score,PSS_Score,PHQ_Score,PHQ_Score_noIBSQs,PHQ_Score_noGIQs,IBSSS_Severity,HAD_Anxiety,HAD_Depression, ncol = 5))
+  
+for (i in 1:20)  local({
+  y <- df3[, i]
+  test <- aov(y ~ df3$pam_clu3)
+  pvalue <- summary(test)[[1]][["Pr(>F)"]][1]
+  pvalueformatted <- format(pvalue, digits=3, nsmall=1.5)
+  g <- ggplot(df3, aes(x=df3$pam_clu3, y=y))    + geom_boxplot(outlier.color = NA) + geom_jitter(aes(size = 1.5)) + labs(x = "pam_3Clu", y = colnames(df3)[i]) +  geom_text(aes(label = paste(" p = ", pvalueformatted), x =1.5, y = max(y, na.rm = TRUE)+ (max(y, na.rm = TRUE))/5) ,  na.rm=TRUE)
+  print(i)
+  print(g)
+  assign(colnames(df3)[i], g, pos =1) #generate an object for each plot
+     })
+# paste(eval(noquote(colnames(metDat_c.ibs1))),collapse = ","), ncol = 4)
+
+ggsave("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/plots_clin_pam3clu_col.png",width = 9, height = 8,dpi = 210, units = "in",plot_grid(Age,BMI,BSQ_OverallSx,BSQ_AbdPain,BSQ_Bloating,BSQ_UsualSeverity,ETI_General_Score,ETI_Physical_Score,ETI_Emotional_Score,ETI_Sexual_Score,ETI_Total_Score,ACE_Score,VSI_Score,PSS_Score,PHQ_Score,PHQ_Score_noIBSQs,PHQ_Score_noGIQs,IBSSS_Severity,HAD_Anxiety,HAD_Depression, ncol = 5))  
+
+ggsave(ggplot(df3, aes(x=as.factor(df3$kmeans_clu3), y=Age))    + geom_boxplot(outlier.color = NA) + geom_jitter() + labs(x = "kmeans_3", y = "Age"), file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/kmeans_3_Age.png",height = 4, width=4, units= "in") 
+
+ggsave(ggplot(df3, aes(x=as.factor(df3$kmeans_clu3), y=BMI))    + geom_boxplot(outlier.color = NA) + geom_jitter() + labs(x = "kmeans_3", y = "BMI"), file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/kmeans_3_BMI.png",height = 4, width=4, units= "in") 
+
+# table(df3$Sex, df3$kmeans_clu3)
+#    
+#      1  2  3
+#   1 15 11  9
+#   2 11 33 23
+# % F   42  75  71  
+df <- data.frame(c(1,2,3),c(42 , 75,  71))
+colnames(df) <- c("Cluster","Percent_Women")
+ggsave(ggplot(df, aes(x=Cluster, y= Percent_Women))    + geom_col() + labs(x = "kmeans_3", y = "Percent_Women")+ theme(axis.text=element_text(size=12)), file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/kmeans_3_Sex.png",height = 3, width=3, units= "in")
+
+ggsave(ggplot(df3, aes(x=as.factor(df3$kmeans_clu3), y=BSQ_AbdPain))    + geom_boxplot(outlier.color = NA) + geom_jitter() + labs(x = "kmeans_3", y = "Abdominal Pain")+ theme(axis.text=element_text(size=12)), file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/kmeans_3_abdominalpain.png",height = 3, width=3, units= "in") 
+
+ggsave(ggplot(df3, aes(x=as.factor(df3$kmeans_clu3), y=BSQ_OverallSx))    + geom_boxplot(outlier.color = NA) + geom_jitter() + labs(x = "kmeans_3", y = "BSQ_OverallSx")+ theme(axis.text=element_text(size=12)), file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/kmeans_3_BSQ_OverallSx.png",height = 3, width=3, units= "in") 
+
+ggsave(ggplot(df3, aes(x=as.factor(df3$kmeans_clu3), y=PHQ_Score))    + geom_boxplot(outlier.color = NA) + geom_jitter() + labs(x = "kmeans_3", y = "PHQ_Score")+ theme(axis.text=element_text(size=12)), file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/kmeans_3_PHQ_Score.png",height = 3, width=3, units= "in")
+
+ggsave(ggplot(df3, aes(x=as.factor(df3$kmeans_clu3), y=Age))    + geom_boxplot(outlier.color = NA) + geom_jitter() + labs(x = "kmeans_3", y = "Age")+ theme(axis.text=element_text(size=12)), file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/kmeans_3_Age.png",height = 3, width=3, units= "in") 
+
+
+```
+# Heatmap with Kmeans cluster membership 
+```{r}
+match(row.names(pData(GRsetColFunFlt.ibs)), row.names(df3))
+pData(GRsetColFunFlt.ibs)$kmeans3 <-  df3[,28]
+pData(GRsetColFunFlt.ibs)$kmeans3 <- as.numeric(as.character(pData(GRsetColFunFlt.ibs)$kmeans3))
+png("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/hm_kmeans3.png", height = 2000, width = 2000, res = 250)
+hm1 <- heatmapMeth(GRsetColFunFlt.ibs, row.names(df_c), pData(GRsetColFunFlt.ibs)$BH, pData(GRsetColFunFlt.ibs)$kmeans3, pData(GRsetColFunFlt.ibs)$Gender)
+dev.off()
+# col1
+# red = C
+# blue = D
+# green = M
+# col2
+# red = 1
+# green = 2
+# blue  =3
+# col3
+# orange = F
+# darkblue = M
+# GRsetColFunFlt.hc1 <- 
+# hm1
+# pData(GRsetColFunFlt.hc
+# png("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/hm_hc_5000.png", height = 2000, width = 2000, res = 250)
+# heatmapMeth(GRsetColFunFlt.hc, row.names(df_c), pData(GRsetColFunFlt.hc)$BH, pData(GRsetColFunFlt.hc)$Gender, pData(GRsetColFunFlt.hc)$Gender)
+# dev.off()
+```
+
+```{r}
+df3_13 <- subset(df3, df3$kmeans_clu3!=2)
+t.test(df3_13$BSQ_AbdPain~df3_13$kmeans_clu3)$p.value
+# [1] 0.0002
+t.test(df3_13$ETI_General_Score ~df3_13$kmeans_clu3)$p.value
+### [1] 0.01638353
+GRsetColFunFlt.ibs13 <- GRsetColFunFlt.ibs[,colnames(GRsetColFunFlt.ibs[,pData(GRsetColFunFlt.ibs)$kmeans3 != 2])]
+
+
+mVals_13 <- getM(GRsetColFunFlt.ibs13)
+head(mVals_13)
+betaVals_13 <- getBeta(GRsetColFunFlt.ibs13)
+head(betaVals_13[,1:5])
+
+# factor of interest
+pData(GRsetColFunFlt.ibs13)$kmeans3 <- factor(pData(GRsetColFunFlt.ibs13)$kmeans3)
+
+# variable to correct for- coupld potenitally correct for age, but leave it out
+
+# use the above to create a design matrix
+design <- model.matrix(~ 0 + kmeans3, data=pData(GRsetColFunFlt.ibs13))
+colnames(design) <- c("kmeans3_1","kmeans3_3")
+library(limma)
+# fit the linear model 
+fit <- lmFit(mVals_13, design)
+
+# create a contrast matrix for specific comparisons
+contMatrix <- makeContrasts(kmeans3_1-kmeans3_3,   levels=design)
+contMatrix
+
+# fit the contrasts
+fit2 <- contrasts.fit(fit, contMatrix)
+fit2 <- eBayes(fit2)
+
+# look at the numbers of DM CpGs at FDR < 0.05
+summary(decideTests(fit2))
+#    kmeans3_1 - kmeans3_3
+# -1                  5729
+# 0                 379700
+# 1                  34828
+
+load("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/hm450annotations.rda")
+# get the table of results for the first contrast 
+ann450kSub <- hm450annotations[match(rownames(mVals_13),hm450annotations$Name),
+                      c(1:4,12:19,24:ncol(hm450annotations))]
+DMPs_sub13 <-  topTable(fit2, num=Inf, coef=1, genelist=ann450kSub)
+DMPs_sub13$meanDiff <- rowMeans(betaVals_13[,colnames(betaVals_13)%in%row.names(subset(pData(GRsetColFunFlt.ibs13), pData(GRsetColFunFlt.ibs13)$kmeans3 ==  "1"))])-rowMeans(betaVals_13[,colnames(betaVals_13)%in%row.names(subset(pData(GRsetColFunFlt.ibs13), pData(GRsetColFunFlt.ibs13)$kmeans3 ==  "3"))])
+DMPs_sub13_fdr <- subset(DMPs_sub13, DMPs_sub13$adj.P.Val<0.05); dim(DMPs_sub13_fdr)
+
+DMPs_sub13_fdr_md <- subset(DMPs_sub13_fdr, abs(DMPs_sub13_fdr$meanDiff)>0.05); dim(DMPs_sub13_fdr_md)
+write.csv(DMPs_sub13_fdr_md, file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/DMPs_sub13_fdr_md_kmeans.csv")
+save(df3, GRsetColFunFlt.ibs,GRsetColFunFlt.ibs13,DMPs_sub13, file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/colon_meth_subgrops_all.Rda")
+
+```
+

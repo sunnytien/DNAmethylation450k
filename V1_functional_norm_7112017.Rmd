@@ -1,0 +1,233 @@
+---
+title: "functional_normalization"
+author: "Swapna Mahurkar-Joshi"
+date: "July 11, 2017"
+output: html_document
+---
+
+```{r}
+library(minfi)
+```
+
+```{r}
+
+########################################################## Functional normalization
+
+setwd("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/")
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/data/technicallyCorrectData/methylationLevel3funNorm.Rda")
+
+  # Remove repeated samples
+  
+RPT.col <- colnames(GRset.funnorm.col.fil[,grep("RPT", colnames(GRset.funnorm.col.fil))]) # [1] "A6172_B_RPT" "A5556_B_RPT" "A6552_B_RPT"
+GRset.funnorm.col.fil <- GRset.funnorm.col.fil[ ,!colnames(GRset.funnorm.col.fil)%in% RPT.col]
+
+RPT.pbmc <- colnames(GRset.funnorm.pbmc.fil[,grep("RPT", colnames(GRset.funnorm.pbmc.fil))]) # [1]  "A6207_P_RPT" "A6530_P_RPT"
+
+GRset.funnorm.pbmc.fil <- GRset.funnorm.pbmc.fil[, !colnames(GRset.funnorm.pbmc.fil)%in% RPT.pbmc ]
+
+beta.funnorm.pbmc <- getBeta (GRset.funnorm.pbmc.fil)
+beta.funnorm.col <- getBeta (GRset.funnorm.col.fil)
+
+save(beta.funnorm.pbmc, beta.funnorm.col, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/betasFunctionalNorm.Rda")
+
+# Bowel habit pairwise comprison
+# IBS-C vs HC
+
+  pdat<- pData(GRset.funnorm.pbmc.fil)
+    GRset.funnorm.pbmc.fil.hcIBSC <- GRset.funnorm.pbmc.fil[,row.names(pdat[which(c(pdat$BH=="C"|pdat$BH=="N")),])]
+   GRset.funnorm.pbmc.fil.hcIBSD <- GRset.funnorm.pbmc.fil[,row.names(pdat[which(c(pdat$BH=="D"|pdat$BH=="N")),])]
+    GRset.funnorm.pbmc.fil.IBSC.D <- GRset.funnorm.pbmc.fil[,row.names(pdat[which(c(pdat$BH=="C"|pdat$BH=="D")),])]
+    GRset.funnorm.pbmc.fil.IBSM.N <- GRset.funnorm.pbmc.fil[,row.names(pdat[which(c(pdat$BH=="M"|pdat$BH=="N")),])]
+     GRset.funnorm.pbmc.fil.IBSM.C <- GRset.funnorm.pbmc.fil[,row.names(pdat[which(c(pdat$BH=="M"|pdat$BH=="C")),])] 
+     GRset.funnorm.pbmc.fil.IBSM.D <- GRset.funnorm.pbmc.fil[,row.names(pdat[which(c(pdat$BH=="M"|pdat$BH=="D")),])]
+     
+dmp.pbmc.fun.hcC <- dmps(GRset.funnorm.pbmc.fil.hcIBSC, pData(GRset.funnorm.pbmc.fil.hcIBSC)$BH)
+dmp.pbmc.fun.hcD <- dmps(GRset.funnorm.pbmc.fil.hcIBSD, pData(GRset.funnorm.pbmc.fil.hcIBSD)$BH)
+dmp.pbmc.fun.CD <- dmps(GRset.funnorm.pbmc.fil.IBSC.D, pData(GRset.funnorm.pbmc.fil.IBSC.D)$BH)
+  
+dmp.pbmc.fun.MC <- dmps(GRset.funnorm.pbmc.fil.IBSM.C, pData(GRset.funnorm.pbmc.fil.IBSM.C)$BH)
+dmp.pbmc.fun.MD <- dmps(GRset.funnorm.pbmc.fil.IBSM.D, pData(GRset.funnorm.pbmc.fil.IBSM.D)$BH)
+dmp.pbmc.fun.NM <- dmps(GRset.funnorm.pbmc.fil.IBSM.N, pData(GRset.funnorm.pbmc.fil.IBSM.N)$BH)
+
+
+BHSig <- as.data.frame(rbind(subset(dmp.pbmc.fun.hcC, dmp.pbmc.fun.hcC$pval<0.000005), subset(dmp.pbmc.fun.hcD, dmp.pbmc.fun.hcD$pval<0.000005), subset(dmp.pbmc.fun.NM, dmp.pbmc.fun.NM$pval<0.000005), subset(dmp.pbmc.fun.CD, dmp.pbmc.fun.CD$pval<0.000005), subset(dmp.pbmc.fun.MC, dmp.pbmc.fun.MC$pval<0.000005),subset(dmp.pbmc.fun.MD, dmp.pbmc.fun.MD$pval<0.000005)))
+write.csv(BHSig, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/BHSig.csv")
+
+
+dmp.pbmc.fun.dx <- dmps(GRset.funnorm.pbmc.fil, pData(GRset.funnorm.pbmc.fil)$Dx)
+dmp.col.fun.dx <- dmps(GRset.funnorm.col.fil, pData(GRset.funnorm.col.fil)$Dx)
+dmp.pbmc.fun.sex <- dmps(GRset.funnorm.pbmc.fil, pData(GRset.funnorm.pbmc.fil)$Gender)
+dmp.col.fun.sex <- dmps(GRset.funnorm.col.fil, pData(GRset.funnorm.col.fil)$Gender)
+
+save("dmp.pbmc.fun.dx","dmp.col.fun.dx","dmp.pbmc.fun.sex","dmp.col.fun.sex", file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/dmps.dx.sex.pbmc.col.func.norm.Rda")
+
+write.csv(dmp.pbmc.fun.dx, "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/dmp.pbmc.fun.dx.csv")
+
+write.csv(dmp.col.fun.dx, "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/dmp.col.fun.dx.csv")
+
+write.csv(dmp.pbmc.fun.sex, "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/dmp.pbmc.fun.sex.csv")
+
+write.csv(dmp.col.fun.sex, "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/dmp.col.fun.sex.csv")
+```
+
+```{r}
+
+dmp.pbmc.fun.dx <- read.csv("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/dmp.pbmc.fun.dx.csv")
+pbmc.sig <- subset(dmp.pbmc.fun.dx, dmp.pbmc.fun.dx$pval<0.05); dim(pbmc.sig) # 14979    16
+
+dmp.col.fun.dx <- read.csv("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/dmp.col.fun.dx.csv")
+col.sig <- subset(dmp.col.fun.dx, dmp.col.fun.dx$pval<0.05); dim(col.sig) #18501    16
+# row.names(pbmc.sig) <- pbmc.sig[,1] 
+# row.names(col.sig) <- col.sig[,1] 
+
+pbmcBetaSigDx <- getBeta(GRset.funnorm.pbmc.fil)[row.names(getBeta(GRset.funnorm.pbmc.fil))%in%row.names(pbmc.sig),]
+colBetaSigDx <- getBeta(GRset.funnorm.col.fil)[row.names(getBeta(GRset.funnorm.col.fil))%in%row.names(col.sig),]
+
+pbmcBetaSigDx <- pbmcBetaSigDx[row.names(pbmc.sig),]; dim(pbmcBetaSigDx )                      
+colBetaSigDx <- colBetaSigDx[row.names(col.sig),]; dim(colBetaSigDx )
+
+save(pbmcBetaSigDx, colBetaSigDx, col.sig, pbmc.sig,file =  "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/sigBetasDxFunct.Rda")
+```
+# IBS HC differences within men and women separately
+```{r}
+GRset.funnorm.pbmc.fil.f <- GRset.funnorm.pbmc.fil[, pData(GRset.funnorm.pbmc.fil)$Gender=="F"]; dim(GRset.funnorm.pbmc.fil.f) #  456009     91
+GRset.funnorm.pbmc.fil.m <-GRset.funnorm.pbmc.fil[, pData(GRset.funnorm.pbmc.fil)$Gender=="M"]; dim(GRset.funnorm.pbmc.fil.m) # 456009   54
+
+GRset.funnorm.col.fil.f <- GRset.funnorm.col.fil[, pData(GRset.funnorm.col.fil)$Gender=="F"]; dim(GRset.funnorm.col.fil.f) #456009   87
+GRset.funnorm.col.fil.m <-GRset.funnorm.col.fil[, pData(GRset.funnorm.col.fil)$Gender=="M"]; dim(GRset.funnorm.col.fil.m) #456009   51
+
+dmp.pbmc.f.dx <- dmps(GRset.funnorm.pbmc.fil.f, pData(GRset.funnorm.pbmc.fil.f)$Dx)
+dmp.pbmc.m.dx <- dmps(GRset.funnorm.pbmc.fil.m, pData(GRset.funnorm.pbmc.fil.m)$Dx)
+
+dmp.col.f.dx <- dmps(GRset.funnorm.col.fil.f, pData(GRset.funnorm.col.fil.f)$Dx)
+dmp.col.m.dx <- dmps(GRset.funnorm.col.fil.m, pData(GRset.funnorm.col.fil.m)$Dx)
+
+dmp.pbmc.f.dx.sig <- subset(dmp.pbmc.f.dx, dmp.pbmc.f.dx$pval<0.00001) #10^-7
+dmp.pbmc.m.dx.sig <- subset(dmp.pbmc.m.dx, dmp.pbmc.m.dx$pval<0.00001) #10^-7
+dmp.col.f.dx.sig <- subset(dmp.col.f.dx, dmp.col.f.dx$pval<0.00001) #10^-7
+dmp.col.m.dx.sig <- subset(dmp.col.m.dx, dmp.col.m.dx$pval<0.00001) #10^-7
+
+dmpList <- list(dmp.pbmc.f.dx,dmp.pbmc.m.dx,dmp.col.f.dx,dmp.col.m.dx) 
+names(dmpList) <- c("dmp.pbmc.f.dx","dmp.pbmc.m.dx","dmp.col.f.dx","dmp.col.m.dx") 
+
+# dmpTableDxSexInt <- tableDMPs(dmpList)
+save(GRset.funnorm.pbmc.fil.f, GRset.funnorm.pbmc.fil.m, GRset.funnorm.col.fil.f, GRset.funnorm.col.fil.f,dmpList, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/GRset.funnorm.gender.cat.Rda")
+setwd("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/"); save(dmp.pbmc.f.dx, dmp.pbmc.m.dx, dmp.col.f.dx, dmp.col.m.dx, file = "DMPsDxSexInter.Rda"); write.csv(dmp.pbmc.f.dx.sig, file="dmp.pbmc.f.dx.sig.csv"); write.csv(dmp.pbmc.m.dx.sig, file="dmp.pbmc.m.dx.sig.csv"); write.csv(dmp.col.f.dx.sig, file="dmp.col.f.dx.sig.csv"); write.csv(dmp.col.m.dx.sig, file="dmp.col.m.dx.sig.csv")  
+```
+
+```{r}
+pData(GRset.funnorm.pbmc.fil)$IBSSexInt <- interaction(pData(GRset.funnorm.pbmc.fil)$Dx, pData(GRset.funnorm.pbmc.fil)$Gender)
+   
+png("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/Sig4femaleDxPBMC.png", height = 1000, width = 800)
+       par  (mfrow=c(2, 3) ) 
+       sapply(rownames(dmp.pbmc.f.dx.sig), function(cpg)
+         {plotCpg(getBeta(GRset.funnorm.pbmc.fil), cpg= cpg,  
+                  pheno =  pData(GRset.funnorm.pbmc.fil)$IBSSexInt, ylab ="Beta values")
+       })
+dev.off()
+png("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/Sig4maleDxPBMC.png", height = 1000, width = 800)
+       par  (mfrow=c(6, 4) ) 
+       sapply(rownames(dmp.pbmc.m.dx.sig), function(cpg)
+         {plotCpg(getBeta(GRset.funnorm.pbmc.fil), cpg= cpg,  
+                  pheno =  pData(GRset.funnorm.pbmc.fil)$IBSSexInt, ylab ="Beta values")
+       })
+dev.off()
+
+
+pData(GRset.funnorm.col.fil)$IBSSexInt <- interaction(pData(GRset.funnorm.col.fil)$Dx, pData(GRset.funnorm.col.fil)$Gender)
+   
+png("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/Sig4femaleDxCol.png", height = 1000, width = 800)
+       par  (mfrow=c(1, 1) )
+       sapply(rownames(dmp.col.f.dx.sig), function(cpg)
+         {plotCpg(getBeta(GRset.funnorm.col.fil), cpg= cpg,  
+                  pheno =  pData(GRset.funnorm.col.fil)$IBSSexInt, ylab ="Beta values")
+       })
+dev.off()
+
+png("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/Sig4maleDxCol.png", height = 1000, width = 800)
+       par  (mfrow=c(3, 2) )
+       sapply(rownames(dmp.col.m.dx.sig), function(cpg)
+         {plotCpg(getBeta(GRset.funnorm.col.fil), cpg= cpg,  
+                  pheno =  pData(GRset.funnorm.col.fil)$IBSSexInt, ylab ="Beta values")
+       })
+dev.off()
+
+```
+
+```{r}
+
+###########################################################
+# dmp.pbmc.qan.IBSSexInt <- dmps(pbmc.gset.quantile.fil, pData(pbmc.gset.quantile.fil)$IBSSexInt)
+# 
+# dmp.col.qan.IBSSexInt <- dmps(col.gset.quantile.fil, pData(col.gset.quantile.fil)$IBSSexInt)
+# 
+# png("Sig4InteractionPBMC.png", height = 1000, width = 800)
+#   par  (mfrow=c(2, 2) ) 
+#        sapply(rownames(dmp.pbmc.qan.IBSSexInt)[1:4], function(cpg)
+#          {plotCpg(getBeta(pbmc.gset.quantile.fil), cpg= cpg,  
+#                   pheno=  pData(pbmc.gset.quantile.fil)$IBSSexInt, ylab ="Beta values")
+#        })
+#        dev.off()
+       
+```
+# DMRs
+```{r}
+# design <- model.matrix(~pData(GRset.funnorm.pbmc.fil)$Dx)
+#  myAnnotation <-    cpg.annotate(object = getM(GRset.funnorm.pbmc.fil),  datatype = "array" , what =  "M", analysis.type= "differential", design = design, contrasts = FALSE, arraytype = "450K", coef = 2, fdr = 0.05)
+ 
+```
+
+# Geneset enrichment analysis
+```{r}
+library(devtools)
+install_github("Bioconductor-mirror/missMethyl")
+library(BAGS)
+library(missMethyl)
+library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+
+#read C2 CP gmt file downlaoded from http://software.broadinstitute.org/gsea/msigdb/genesets.jsp?collection=C2
+MSigDB_C2_CP <- ReadGMT("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/gsea/genesets/c2.all.v6.0.entrez.gmt")
+
+#only keep KEGG pathways
+MSigDB_C2_CP_KEGG <- MSigDB_C2_CP[grepl('^KEGG', names(MSigDB_C2_CP))]
+
+
+
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/hm450annotations.rda")
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/sigBetasDxFunct.Rda")
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/data/technicallyCorrectData/methylationLevel3funNorm.Rda")
+
+# #perform gsameth
+# gsa.MSigDB <- gsameth(sig.cpg=row.names(pbmc.sig), all.cpg=rownames(GRset.funnorm.pbmc.fil), collection= MSigDB_C2_CP_KEGG)
+# 
+# #sort by FDR p-value & only keep <0.05
+# gsa.MSigDB <- as.data.frame(gsa.MSigDB[order(gsa.MSigDB[,4]),])
+# sigMSigDB <- gsa.MSigDB[gsa.MSigDB$FDR<0.20,]; dim(sigMSigDB)
+
+#perform gometh PBMC hypo
+gst.KEGG <- gometh(sig.cpg=row.names(subset(pbmc.sig, pbmc.sig$meanDiff<0)), all.cpg=rownames(GRset.funnorm.pbmc.fil), collection="KEGG")
+#sort by FDR p-value & only keep <0.05
+gst.KEGG <- gst.KEGG[order(gst.KEGG$FDR),]
+sigKEGGhypo <- gst.KEGG[gst.KEGG$FDR<0.05,]; dim(sigKEGGhypo)
+
+#perform gometh PBMC hyper
+gst.KEGG <- gometh(sig.cpg=row.names(subset(pbmc.sig, pbmc.sig$meanDiff>0)), all.cpg=rownames(GRset.funnorm.pbmc.fil), collection="KEGG")
+#sort by FDR p-value & only keep <0.05
+gst.KEGG <- gst.KEGG[order(gst.KEGG$FDR),]
+sigKEGGhyper <- gst.KEGG[gst.KEGG$FDR<0.05,]; dim(sigKEGGhyper)
+
+#perform gometh Colon hypo
+gst.KEGG.c <- gometh(sig.cpg=row.names(subset(col.sig, col.sig$meanDiff<0)), all.cpg=rownames(GRset.funnorm.col.fil), collection="KEGG")
+#sort by FDR p-value & only keep <0.05
+gst.KEGG.c <- gst.KEGG.c[order(gst.KEGG.c$FDR),]
+sigKEGG.c.hypo <- gst.KEGG.c[gst.KEGG.c$FDR<0.05,]; dim(sigKEGG.c.hypo)
+
+#perform gometh Colon hyper
+gst.KEGG.c <- gometh(sig.cpg=row.names(subset(col.sig, col.sig$meanDiff>0)), all.cpg=rownames(GRset.funnorm.col.fil), collection="KEGG")
+#sort by FDR p-value & only keep <0.05
+gst.KEGG.c <- gst.KEGG.c[order(gst.KEGG.c$FDR),]
+sigKEGG.c.hyper <- gst.KEGG.c[gst.KEGG.c$FDR<0.05,]; dim(sigKEGG.c.hyper)
+```
+
+
+

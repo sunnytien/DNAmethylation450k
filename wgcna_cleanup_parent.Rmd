@@ -1,0 +1,912 @@
+---
+title: "WGCNA_cleanup"
+author: "Swapna Mahurkar-Joshi"
+date: "July 7, 2017"
+output: html_document
+---
+
+Methylation Colon data; identify clusters, assign cluster membership
+correlate the cluster memberships with phenotypes. Identify the genes in those clusters; OR perform WGCNA
+For PBMCs; identify clusters and correlate with 
+
+```{r, warning=FALSE, echo=FALSE,message=FALSE}
+library(WGCNA)
+library(sqldf)
+library(impute)
+library(igraph)
+library(biomaRt)
+library(GEOquery)
+```
+
+```{r}
+######## #1) Get data from Kang et al. on GEO
+# GSEA
+gseid <- 25219
+gsedat <- getGEO(paste("GSE",gseid,sep=""), GSEMatrix=TRUE)
+geneProbeInfo <- pData(featureData(gsedat[[1]])) ## Probe information - let's use gene symbols
+```
+
+```{r}
+
+# We work with two sets:
+nSets = 2;
+# For easier labeling of plots, create a vector holding descriptive names of the two sets.
+setLabels = c("IBS", "HC")
+shortLabels = c("IBS", "HC")
+# Form multi-set expression data: columns starting from 9 contain actual expression data.
+multiExpr = vector(mode = "list", length = nSets)
+
+multiExpr[[1]] = list(data = as.data.frame(t(datIBS)));
+rownames(multiExpr[[1]]$data) = names(datIBS);
+multiExpr[[2]] = list(data = as.data.frame(t(datHC)));
+rownames(multiExpr[[2]]$data) = names(datHC);
+# Check that the data has the correct format for many functions operating on multiple sets:
+exprSize = checkSets(multiExpr)
+
+```
+
+```{r}
+# Check that all genes and samples have sufficiently low numbers of missing values.
+gsg = goodSamplesGenesMS(multiExpr, verbose = 3);
+gsg$allOK
+```
+
+```{r}
+if (!gsg$allOK)
+{
+  # Print information about the removed genes:
+  if (sum(!gsg$goodGenes) > 0)
+    printFlush(paste("Removing genes:", paste(names(multiExpr[[1]]$data)[!gsg$goodGenes], 
+                                              collapse = ", ")))
+  for (set in 1:exprSize$nSets)
+  {
+    if (sum(!gsg$goodSamples[[set]]))
+      printFlush(paste("In set", setLabels[set], "removing samples",
+                       paste(rownames(multiExpr[[set]]$data)[!gsg$goodSamples[[set]]], collapse = ", ")))
+    # Remove the offending genes and samples
+    multiExpr[[set]]$data = multiExpr[[set]]$data[gsg$goodSamples[[set]], gsg$goodGenes];
+  }
+  # Update exprSize
+  exprSize = checkSets(multiExpr)
+}
+
+```
+
+
+```{r}
+sampleTrees = list()
+for (set in 1:nSets)
+{
+  sampleTrees[[set]] = hclust(dist(multiExpr[[set]]$data), method = "average")
+}
+save(multiExpr, exprSize, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/wgcna/wgcna.sets.Rda")
+```
+
+
+```{r}
+
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/wgcna/wgcna.sets.Rda")
+pdf(file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/wgcna/SampleClustering.pdf", width = 12, height = 12);
+par(mfrow=c(2,1))
+par(mar = c(0, 4, 2, 0))
+for (set in 1:nSets)
+  plot(sampleTrees[[set]], main = paste("Sample clustering on all genes in", setLabels[set]),
+       xlab="", sub="", cex = 0.7);
+dev.off();
+
+```
+
+```{r}
+
+# Choose the "base" cut height for the IBS data set
+# baseHeight = 6
+# Adjust the cut height for the HC data set for the number of samples
+# cutHeights = c(6.2, 6.2*exprSize$nSamples[2]/exprSize$nSamples[1]);
+# Re-plot the dendrograms including the cut lines
+## Set the cutheights manually since the cutoff would exclude all the HC samples
+cutHeights = c(6.0, 6.1)
+pdf(file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/wgcna/SampleClustering.pdf", width = 12, height = 12);
+par(mfrow=c(2,1))
+par(mar = c(0, 4, 2, 0))
+for (set in 1:nSets)
+{
+  plot(sampleTrees[[set]], main = paste("Sample clustering on all genes in", setLabels[set]),
+       xlab="", sub="", cex = 0.7);
+  abline(h=cutHeights[set], col = "red");
+}
+dev.off();
+```
+
+```{r}
+for (set in 1:nSets)
+{
+  # Find clusters cut by the line
+  labels = cutreeStatic(sampleTrees[[set]], cutHeight = cutHeights[set])
+  # Keep the largest one (labeled by the number 1)
+  keep = (labels==1)
+  multiExpr[[set]]$data = multiExpr[[set]]$data[keep, ]
+}
+collectGarbage();
+# Check the size of the leftover data
+exprSize = checkSets(multiExpr)
+exprSize
+```
+
+```{r}
+traitData = as.data.frame(datMeta1);
+# See how big the traits are and what are the trait and sample names
+dim(traitData)
+names(traitData)
+
+# Form a multi-set structure that will hold the clinical traits.
+nSets<- 2
+Traits = vector(mode="list", length = nSets);
+for (set in 1:nSets)
+{
+  setSamples = rownames(multiExpr[[set]]$data);
+  traitRows = match(setSamples, row.names(traitData));
+  Traits[[set]] = list(data = traitData[traitRows, ]);
+  rownames(Traits[[set]]$data) = row.names(traitData[traitRows, ]);
+}
+collectGarbage();
+# Define data set dimensions
+nGenes = exprSize$nGenes;
+nSamples = exprSize$nSamples;
+
+```
+
+```{r}
+save(multiExpr, Traits, nGenes, nSamples, setLabels, shortLabels, exprSize, 
+     file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/wgcna/Consensus-dataInput.RData");
+
+```
+
+```{r}
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/wgcna/Consensus-dataInput.RData")
+# Choose a set of soft-thresholding powers
+powers = c(seq(4,10,by=1), seq(12,20, by=2));
+# Initialize a list to hold the results of scale-free analysis
+powerTables = vector(mode = "list", length = nSets);
+# Call the network topology analysis function for each set in turn
+for (set in 1:nSets)
+  powerTables[[set]] = list(data = pickSoftThreshold(multiExpr[[set]]$data, powerVector=powers,
+                                                     verbose = 2)[[2]]);
+collectGarbage();
+# Plot the results:
+colors = c("black", "red")
+# Will plot these columns of the returned scale free analysis tables
+plotCols = c(2,5,6,7)
+colNames = c("Scale Free Topology Model Fit", "Mean connectivity", "Median connectivity",
+"Max connectivity");
+# Get the minima and maxima of the plotted points
+ylim = matrix(NA, nrow = 2, ncol = 4);
+for (set in 1:nSets)
+{
+  for (col in 1:length(plotCols))
+  {
+    ylim[1, col] = min(ylim[1, col], powerTables[[set]]$data[, plotCols[col]], na.rm = TRUE);
+    ylim[2, col] = max(ylim[2, col], powerTables[[set]]$data[, plotCols[col]], na.rm = TRUE);
+  }
+}
+save(powerTables, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/wgcna/powerTables.rda")
+# Plot the quantities in the chosen columns vs. the soft thresholding power
+
+png("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/wgcna/scaleFreeTopologyFit.png")
+ sizeGrWindow(8, 6)
+par(mfcol = c(2,2));
+par(mar = c(4.2, 4.2 , 2.2, 0.5))
+cex1 = 0.7;
+for (col in 1:length(plotCols)) for (set in 1:nSets)
+{
+  if (set==1)
+  {
+    plot(powerTables[[set]]$data[,1], -sign(powerTables[[set]]$data[,3])*powerTables[[set]]$data[,2],
+         xlab="Soft Threshold (power)",ylab=colNames[col],type="n", ylim = ylim[, col],
+         main = colNames[col]);
+    addGrid();
+  }
+  if (col==1)
+  {
+    text(powerTables[[set]]$data[,1], -sign(powerTables[[set]]$data[,3])*powerTables[[set]]$data[,2],
+         labels=powers,cex=cex1,col=colors[set]);
+  } else
+    text(powerTables[[set]]$data[,1], powerTables[[set]]$data[,plotCols[col]],
+         labels=powers,cex=cex1,col=colors[set]);
+  if (col==1)
+  {
+    legend("bottomright", legend = setLabels, col = colors, pch = 20) ;
+  } else
+    legend("topright", legend = setLabels, col = colors, pch = 20) ;
+}
+
+dev.off()
+```
+
+```{r}
+beta1 <- 6
+k.dataOne=softConnectivity(multiExpr[[1]]$data,power=beta1)-1 
+k.dataTwo= softConnectivity(multiExpr[[2]]$data,power=beta1)-1 
+
+kCut = 5000 # number of most connected genes that will be considered  
+kRank = rank(-k.dataOne) 
+vardataOne=apply(multiExpr[[1]]$data,2,var) 
+vardataTwo= apply(multiExpr[[2]]$data,2,var) 
+# Since we want to compare the results of data set I and data set II we restrict the analysis to the most connected probesets with non-zero variance in both data sets  
+restk = kRank <= kCut & vardataOne>0 &vardataTwo>0 
+# thus our module detection uses the following number of genes 
+sum(restk) 
+
+```
+
+```{r}
+ADJdataOne=adjacency(datExpr= multiExpr[[1]]$data[,restk], power = beta1) 
+dissTOMdataOne=TOMdist(ADJdataOne) 
+hierTOMdataOne = hclust(as.dist(dissTOMdataOne),method="average"); 
+```
+# 5000 most connected genes
+```{r}
+par(mfrow=c(1,1)) 
+plot(hierTOMdataOne,labels=F,main="Dendrogram, 5000 most connected in data set 
+I") 
+```
+
+```{r}
+colorhdataOne= cutreeStaticColor(hierTOMdataOne,cutHeight = 0.98, minSize = 18) 
+# Comment: we are using here the static tree cut method. But we strongly recommend that the user also explore the more power dynamic tree cut method (see the helpfile of cutreeDynamic). 
+png("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/wgcna/modules_IBS.png")
+par(mfrow=c(2,1),mar=c(2,4,1,1)) 
+plot(hierTOMdataOne, main="IBS colon data set, n=101", labels=F, xlab=
+"", sub=""); 
+plotColorUnderTree(hierTOMdataOne,colors=data.frame(module=colorhdataOne)) 
+title("Module membership data set I") 
+dev.off()
+```
+
+```{r}
+cmd1=cmdscale(as.dist(dissTOMdataOne),2) 
+png("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/wgcna/MDS_modules.png")
+par(mfrow=c(1,1)) 
+plot(cmd1, col=as.character(colorhdataOne),  main="
+MDS plot",xlab="Scaling 
+Dimension 1",ylab="Scaling Dimension 2",
+cex.axis=1.5,cex.lab=1.5, cex.main=1.5) 
+dev.off()
+```
+# Now we construct the TOM dissimilarity in data set II
+```{r}
+ADJdataTwo=adjacency(multiExpr[[2]]$data[,restk], power=beta1) 
+dissTOMdataTwo=TOMdist(ADJdataTwo) 
+hierTOMdataTwo = hclust(as.dist(dissTOMdataTwo),method="average"); 
+#To determine which modules of data set I are preserved in data setII, we assign the data set I module colors to the genes in the hierarchical clustering tree of data set II. This reveals 
+# that the modules are highly preserved between the 2 data sets.  
+png("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/wgcna/modeule_preservation_HC.png")
+par(mfrow=c(2,1),mar=c(2,4,1,1)) 
+plot(hierTOMdataTwo, main="Healthy control data set, n=36 ", labels=F, xlab="
+", sub=""); 
+plotColorUnderTree(hierTOMdataTwo,colors=data.frame(module=colorhdataOne))  
+title("Module membership based on data set I") 
+dev.off()
+```
+
+
+```{r}
+par(mfrow=c(1,1)) 
+which.module="brown" 
+ClusterSamples=hclust(dist(multiExpr[[1]]$data[,restk][,colorhdataOne==which.module] 
+),method="average")  
+# for this module we find 
+heatmap(t(scale(multiExpr[[1]]$data[ClusterSamples$order,restk][,colorhdataOne==which.module ]) ), nrgcols=30,rlabels=T, clabels=T,rcols=which.module, title=paste("data set I, heatmap",which.module,"module") ) 
+```
+
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/DNA_meth/DNA_methylation_02062017/Minfi_analysis/mset_auto_col.rda")
+
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/DNA_meth/DNA_methylation_02062017/Minfi_analysis/mset_auto_pbmc.rda")
+
+metDat_p<- read.csv("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/DNA_meth/DNA_methylation_02062017/Minfi_analysis/Metadata_pbmc_methylation.csv", row.names = 1)
+```
+
+```{r}
+colnames(mset_auto_col) <- pData(mset_auto_col)$External.Sample.ID
+mset_auto_col1 <- mset_auto_col[,-(grep("RPT", colnames(mset_auto_col)))]
+md <- getBeta(mset_auto_col1)
+colnames(md) <- pData(mset_auto_col1)$NDP
+metDat1 <- metDat[row.names(metDat)%in%colnames(md),-c(1,2)]
+metDat1 <- metDat1[colnames(md),]
+match(row.names(metDat1), colnames(md))
+md.nr3c1SigColon <- md[row.names(md)%in% c("cg16335926", "cg15645634", "cg17860381", "cg18849621", "cg27345592", "cg13907255", "cg04111177"),]
+
+md.nr3c1SigColonIBS <- md.nr3c1SigColon[,colnames(md.nr3c1SigColon)%in%row.names(subset(metDat, metDat$Group ==2))]
+metDatIBS <- metDat1[row.names(metDat1)%in%row.names(subset(metDat, metDat$Group==2)),]
+match(colnames(md.nr3c1SigColonIBS), row.names(metDatIBS ))
+
+md.nr3c1SigColonHC <- md.nr3c1SigColon[,colnames(md.nr3c1SigColon)%in%row.names(subset(metDat, metDat$Group ==1))]
+metDatHC <- metDat1[row.names(metDat1)%in%row.names(subset(metDat, metDat$Group==1)),]
+match(colnames(md.nr3c1SigColonHC), row.names(metDatHC))
+
+```
+
+```{r}
+
+data1<-cbind(t(md.nr3c1SigColonIBS),metDatIBS); dim(data1)
+library(Hmisc)
+
+cor <- rcorr(as.matrix(data1), type="pearson")
+datCor<-round(cor$r, 2); dim(datCor)
+datP<-cor$P; dim(datP)
+
+
+library(mixOmics)
+color<-color.jet
+par(mfrow = c(1,2));
+png("mixOmics_col_Nr3c1_pheno.png", height=2000, width=3000, res=300)
+nr3c1_pheno <- imgCor(t(md.nr3c1SigColonIBS), metDatIBS, X.var.names = TRUE,
+                       Y.var.names = TRUE,
+                       sideColors = TRUE,
+                       interactive.dev = TRUE)
+                       # main = TRUE)
+# color, row.cex, col.cex,symkey, keysize,
+# xlab, ylab, margins, lhei, lwid)
+dev.off()
+
+
+a <- qplot(as.numeric(as.character(cg15645634)), as.numeric(as.character(ETI_Total_Score)), data = data1)
+b <- a + geom_point(aes(color=factor(data1$Sex)))  + geom_smooth(aes(color = factor(data1$Sex)), method="lm", fullrange=TRUE)
+ggsave(b, file= "nr3c1_cg15645634_ETI_Total_Score.png")
+
+a <- qplot(as.numeric(as.character(cg15645634)), as.numeric(as.character(ETI_General_Score)), data = data1)
+c <- a + geom_point(aes(color=factor(data1$Sex)))  + geom_smooth(aes(color = factor(data1$Sex)), method="lm", fullrange=TRUE)
+ggsave(c, file= "nr3c1_cg15645634_ETI_General_Score.png")
+
+a <- qplot(as.numeric(as.character(cg15645634)), as.numeric(as.character(ETI_Physical_Score)), data = data1)
+d <- a + geom_point(aes(color=factor(data1$Sex)))  + geom_smooth(aes(color = factor(data1$Sex)), method="lm", fullrange=TRUE)
+ggsave(d, file = "nr3c1_cg15645634_ETI_Physical_Score.png")
+
+#########################
+# all subjects
+data1<-cbind(t(md.nr3c1SigColon),metDat1); dim(data1)
+library(Hmisc)
+
+cor <- rcorr(as.matrix(data1), type="pearson")
+datCor<-round(cor$r, 2); dim(datCor)
+datP<-cor$P; dim(datP)
+
+
+
+library(mixOmics)
+color<-color.jet
+par(mfrow = c(1,2));
+png("mixOmics_col_Nr3c1_pheno_all_subjects.png", height=2000, width=3000, res=300)
+nr3c1_pheno <- imgCor(t(md.nr3c1SigColon), metDat1, X.var.names = TRUE,
+                       Y.var.names = TRUE,
+                       sideColors = TRUE,
+                       interactive.dev = TRUE)
+                       # main = TRUE)
+# color, row.cex, col.cex,symkey, keysize,
+# xlab, ylab, margins, lhei, lwid)
+dev.off()
+
+
+
+```
+
+```{r}
+# md.nr3c1SigPbmc <- "cg10847032"
+colnames(mset_auto_pbmc) <- pData(mset_auto_pbmc)$External.Sample.ID
+mset_auto_pbmc1 <- mset_auto_pbmc[,-(grep("RPT", colnames(mset_auto_pbmc)))]
+md <- getBeta(mset_auto_pbmc1)
+colnames(md) <- pData(mset_auto_pbmc1)$NDP
+metDat1 <- metDat_p[row.names(metDat_p)%in%colnames(md),-c(1,2)]
+metDat1 <- metDat1[colnames(md),]
+match(row.names(metDat1), colnames(md))
+md.nr3c1SigPbmc <- as.matrix(md[row.names(md)%in% "cg10847032",])
+
+md.nr3c1SigPbmcIBS <- as.matrix(md.nr3c1SigPbmc[row.names(md.nr3c1SigPbmc)%in%row.names(subset(metDat_p, metDat_p$Group ==2)),])
+colnames(md.nr3c1SigPbmcIBS) <- "cg10847032"
+metDatIBS <- metDat1[row.names(metDat1)%in%row.names(subset(metDat_p, metDat_p$Group==2)),]
+match(row.names(md.nr3c1SigPbmcIBS), row.names(metDatIBS ))
+
+md.nr3c1SigPbmcHC <- as.matrix(md.nr3c1SigPbmc[row.names(md.nr3c1SigPbmc)%in%row.names(subset(metDat_p, metDat_p$Group ==1)),])
+metDatHC <- metDat1[row.names(metDat1)%in%row.names(subset(metDat_p, metDat_p$Group==1)),]
+match(row.names(md.nr3c1SigPbmcHC), row.names(metDatHC))
+
+data1<-cbind(md.nr3c1SigPbmcIBS,metDatIBS); dim(data1)
+
+library(Hmisc)
+cor <- rcorr(as.matrix(data1), type="pearson")
+datCor<-round(cor$r, 2); dim(datCor)
+datP<-cor$P; dim(datP)
+
+library(mixOmics)
+color<-color.jet
+par(mfrow = c(1,2));
+png("mixOmics_Pbmc_Nr3c1_pheno.png", height=2000, width=3000, res=300)
+nr3c1_pheno <- imgCor(md.nr3c1SigPbmcIBS, metDatIBS, X.var.names = TRUE,
+                       Y.var.names = TRUE,
+                       sideColors = TRUE,
+                       interactive.dev = TRUE)
+                       # main = TRUE)
+# color, row.cex, col.cex,symkey, keysize,
+# xlab, ylab, margins, lhei, lwid)
+dev.off()
+
+```
+
+```{r}
+# it is possible that the Dx may be irrelevant and the ETI scores are correlated with methylation, to test, use the entire data for colon
+
+load("nr3c1_pr_all.rda")
+nr3c1_all_col <- getBeta(mset_auto_col[row.names(mset_auto_col)%in%row.names(nr3c1_pr_all),])
+colnames(nr3c1_all_col) <- pData(mset_auto_col)$NDP
+metDat1 <- metDat[row.names(metDat)%in%colnames(nr3c1_all_col),-c(1,2)]; dim(metDat1)
+data1<-cbind(t(nr3c1_all_col),metDat1); dim(data1)
+
+library(Hmisc)
+cor <- rcorr(as.matrix(data1), type="pearson")
+datCor<-round(cor$r, 2); dim(datCor)
+datP<-cor$P; dim(datP)
+
+
+library(mixOmics)
+color<-color.jet
+par(mfrow = c(1,2));
+png("mixOmics_col_Nr3c1_allPr_pheno.png", height=2000, width=3000, res=300)
+nr3c1_pheno <- imgCor(t(nr3c1_all_col), metDat1, X.var.names = TRUE,
+                       Y.var.names = TRUE,
+                       sideColors = TRUE,
+                       interactive.dev = TRUE)
+                       # main = TRUE)
+# color, row.cex, col.cex,symkey, keysize,
+# xlab, ylab, margins, lhei, lwid)
+dev.off()
+
+a <- qplot(as.numeric(as.character(cg15645634)), as.numeric(as.character(ETI_Total_Score)), data = data1)
+b <- a + geom_point(aes(color=factor(data1$Sex)))  + geom_smooth(aes(color = factor(data1$Sex)), method="lm", fullrange=TRUE)
+ggsave(b, file= "nr3c1_cg15645634_ETI_Total_Score.png")
+
+a <- qplot(as.numeric(as.character(cg15645634)), as.numeric(as.character(ETI_General_Score)), data = data1)
+c <- a + geom_point(aes(color=factor(data1$Sex)))  + geom_smooth(aes(color = factor(data1$Sex)), method="lm", fullrange=TRUE)
+ggsave(c, file= "nr3c1_cg15645634_ETI_General_Score.png")
+
+a <- qplot(as.numeric(as.character(cg15645634)), as.numeric(as.character(ETI_Physical_Score)), data = data1)
+d <- a + geom_point(aes(color=factor(data1$Sex)))  + geom_smooth(aes(color = factor(data1$Sex)), method="lm", fullrange=TRUE)
+ggsave(d, file = "nr3c1_cg15645634_ETI_Physical_Score.png")
+
+
+#########################
+# all subjects
+data1<-cbind(t(md.nr3c1SigColon),metDat1); dim(data1)
+library(Hmisc)
+
+cor <- rcorr(as.matrix(data1), type="pearson")
+datCor<-round(cor$r, 2); dim(datCor)
+datP<-cor$P; dim(datP)
+
+library(mixOmics)
+color<-color.jet
+par(mfrow = c(1,2));
+png("mixOmics_col_Nr3c1_pheno_all_subjects.png", height=2000, width=3000, res=300)
+nr3c1_pheno <- imgCor(t(md.nr3c1SigColon), metDat1, X.var.names = TRUE,
+                       Y.var.names = TRUE,
+                       sideColors = TRUE,
+                       interactive.dev = TRUE)
+                       # main = TRUE)
+# color, row.cex, col.cex,symkey, keysize,
+# xlab, ylab, margins, lhei, lwid)
+dev.off()
+
+```
+
+
+
+
+
+```{r}
+library(WGCNA)
+s = abs(bicor(WGCNA_matrix))
+```
+
+```{r}
+powers = c(c(1:10), seq(from = 12, to=20, by=2))
+sft = pickSoftThreshold(WGCNA_matrix, powerVector = powers, verbose = 5)
+png("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/wgcna/softPower.png")
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     xlab='Soft Threshold (power)',ylab='Scale Free Topology Model Fit,signed R^2',
+     type='n', main = paste('Scale independence'));
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     labels=powers,cex=1,col='red'); abline(h=0.90,col='red')
+dev.off()
+```
+# adjacency
+```{r}
+beta = 10
+a = s^beta
+```
+# Dissimilarity
+```{r}
+w = 1-a
+```
+
+```{r}
+# create gene tree by average linkage hierarchical clustering 
+geneTree = hclust(as.dist(w), method = 'average')
+
+#module identification using dynamic tree cut algorithm
+modules = cutreeDynamic(dendro = geneTree, distM = w, deepSplit = 4, pamRespectsDendro = FALSE,
+                            minClusterSize = 30)
+#assign module colours
+module.colours = labels2colors(modules)
+
+#plot the dendrogram and corresponding colour bars underneath
+png("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/wgcna/moduleColors.png")
+plotDendroAndColors(geneTree, module.colours, 'Module colours', dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05, main='')
+dev.off()
+```
+
+```{r}
+library(ape)
+#calculate eigengenes
+MEs = moduleEigengenes(WGCNA_matrix, colors = module.colours, excludeGrey = FALSE)$eigengenes
+
+#calculate dissimilarity of module eigengenes
+MEDiss = 1-cor(MEs);
+
+#cluster module eigengenes
+METree = hclust(as.dist(MEDiss), method = 'average');
+
+#plot the result with phytools package
+png("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/wgcna/eigengeneDendrogram.png")
+par(mar=c(2,2,2,2))
+
+plot.phylo(as.phylo(METree),type = 'fan',show.tip.label = FALSE, main='')
+tiplabels(frame = 'circle',col='black', text=rep('',length(unique(modules))), bg = levels(as.factor(module.colours)))
+dev.off()
+```
+
+
+```{r}
+
+#grouping in high and low IBSSSS (lscore)
+datTraits <- as.data.frame(datTraits)
+ibssss = as.numeric(datTraitsIBS$ETI_Total_Score)
+ibssss[ibssss<6] = 0
+ibssss[ibssss>=6] = 1
+
+#calculate gene significance measure for lymphocyte score (lscore) - Welch's t-Test
+GS_ibssss = t(sapply(1:ncol(WGCNA_matrix),function(x)c(t.test(WGCNA_matrix[,x]~ibssss,var.equal=F)$p.value,                                          t.test(WGCNA_matrix[,x]~ibssss,var.equal=F)$estimate[1],                                          t.test(WGCNA_matrix[,x]~ibssss,var.equal=F)$estimate[2])))
+GS_ibssss = cbind(GS_ibssss, abs(GS_ibssss[,2] - GS_ibssss[,3]))
+colnames(GS_ibssss) = c('p_value','mean_high_IBS_SS_Score','mean_low_IBS_SS_Score',
+                        'effect_size(high-low score)'); rownames(GS_ibssss) = colnames(WGCNA_matrix)
+
+```
+# GO terms
+```{r}
+#reference genes = all 5000 top mad genes 
+ref.genes = colnames(WGCNA_matrix)
+
+#create data frame for GO analysis
+library(org.Hs.eg.db)
+GO = toTable(org.Hs.egGO); SYMBOL = toTable(org.Hs.egSYMBOL)
+GO_data_frame = data.frame(GO$go_id, GO$Evidence,SYMBOL$symbol[match(GO$gene_id,SYMBOL$gene_id)])
+
+#create GOAllFrame object
+library(AnnotationDbi)
+GO_ALLFrame = GOAllFrame(GOFrame(GO_data_frame, organism = 'Homo sapiens'))
+
+#create gene set
+# source("http://bioconductor.org/biocLite.R")
+# biocLite("checkmate")
+library(GSEABase)
+gsc <- GeneSetCollection(GO_ALLFrame, setType = GOCollection())
+
+#perform GO enrichment analysis and save results to list - this make take several minutes
+
+library(GOstats)
+GSEAGO = vector('list',length(unique(modules)))
+for(i in 0:(length(unique(modules))-1)){
+  GSEAGO[[i+1]] = summary(hyperGTest(GSEAGOHyperGParams(name = 'Homo sapiens GO', 
+              geneSetCollection = gsc, geneIds = colnames(WGCNA_matrix)[modules==i], 
+              universeGeneIds = ref.genes, ontology = 'BP', pvalueCutoff = 0.05, 
+              conditional = FALSE, testDirection = 'over')))
+  print(i)
+}
+
+cutoff_size = 100
+
+GO_module_name = rep(NA,length(unique(modules)))
+for (i in 1:length(unique(modules))){
+  GO_module_name[i] = 
+    GSEAGO[[i]][GSEAGO[[i]]$Size<cutoff_size,
+    ][which(GSEAGO[[i]][GSEAGO[[i]]$Size<cutoff_size,]$Count==max(GSEAGO[[i]][GSEAGO[[i]]$
+    Size<cutoff_size,]$Count)),7]
+}
+
+
+GO_module_name[1] = 'module 0'
+library(plyr)
+#calculate module significance
+MS.ibssss = as.data.frame(cbind(as.data.frame(GS_ibssss),as.matrix(modules)))
+MS.ibssss$log_p_value = -log10(as.numeric(MS.ibssss$p_value))
+MS.ibssss = ddply(MS.ibssss, .(modules), summarize, mean(log_p_value), sd(log_p_value))
+colnames(MS.ibssss) = c('modules','pval','sd')
+MS.ibssss.bar = as.numeric(MS.ibssss[,2])
+MS.ibssss.bar[MS.ibssss.bar<(-log10(0.05))] = 0
+names(MS.ibssss.bar) = GO_module_name
+MS.ibssss.bar
+METree.GO = METree
+label.order = match(METree$labels,paste0('ME',labels2colors(0:(length(unique(modules))-1))))
+METree.GO$labels = GO_module_name[label.order]
+png("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/wgcna/METreeBarsIBSSSSModules.png")
+plotTree.wBars(as.phylo(METree.GO), MS.ibssss.bar, tip.labels = TRUE, scale = 0.2)
+dev.off()
+save(ref_genes, GO, GO_data_framegsc, GO_ALLFrame, GSEAGO,GO_module_name ,METree.GO,label.order,modules, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/wgcna/GO_module_data.Rda")
+```
+```{r}
+ADJ1=abs(cor(datMeth1,use="p"))^6
+```
+
+
+```{r}
+k=softConnectivity(datE=datMeth1,power=6)
+png("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/wgcna/scaleFreeTopology.png", width = 1000, height = 500)
+# sizeGrWindow(10,5)
+par(mfrow=c(1,2))
+hist(k)
+scaleFreePlot(k, main="Check scale free topology\n")
+dev.off
+```
+```{r}
+datMeth1=datMeth1[, rank(-k,ties.method="first" )<=5000]
+
+```
+
+```{r}
+save(datMeth1, ADJ1, dissADJ, k, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/wgcna/wgcna_out1.Rda")
+
+dissADJ=1-ADJ1
+dissTOM=TOMdist(ADJ1)
+collectGarbage()
+
+```
+
+```{r}
+pam4=pam(as.dist(dissADJ), 4)
+pam5=pam(as.dist(dissADJ), 5)
+pam6=pam(as.dist(dissADJ), 6)
+# Cross-tabulte the detected and the true (simulated) module membership:
+table(pam4$clustering, truemodule)
+table(pam5$clustering, truemodule)
+table(pam6$clustering, truemodule)
+```
+
+```{r}
+pamTOM4=pam(as.dist(dissTOM), 4)
+pamTOM5=pam(as.dist(dissTOM), 5)
+pamTOM6=pam(as.dist(dissTOM), 6)
+# # Cross-tabulte the detected and the true (simulated) module membership:
+# table(pamTOM4$clustering, truemodule)
+# table(pamTOM5$clustering, truemodule)
+# table(pamTOM6$clustering, truemodule)
+
+```
+
+```{r}
+hierADJ=hclust(as.dist(dissADJ), method="average" )
+# Plot the resulting clustering tree together with the true color assignment
+# sizeGrWindow(10,5);
+png("Gene hierarchical clustering dendrogram and simulated module colors.png", width = 1000, height = 500)
+plotDendroAndColors(hierADJ, colors = data.frame(truemodule), dendroLabels = FALSE, hang = 0.03, 
+                    main = "Gene hierarchical clustering dendrogram and simulated module colors" )
+dev.off()
+
+```
+
+```{r}
+colorStaticADJ=as.character(cutreeStaticColor(hierADJ, cutHeight=.99, minSize=20))
+# Plot the dendrogram with module colors
+png("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/wgcna/Gene dendrogram and module colors.png", width = 1000, height = 500)
+sizeGrWindow(10,5);
+plotDendroAndColors(hierADJ, colors = data.frame(truemodule, colorStaticADJ),
+                    dendroLabels = FALSE, abHeight = 0.99,
+                    main = "Gene dendrogram and module colors")
+dev.off()
+```
+
+```{r}
+branch.number=cutreeDynamic(hierADJ,method="tree")
+# This function transforms the branch numbers into colors
+colorDynamicADJ=labels2colors(branch.number )
+```
+
+```{r}
+
+colorDynamicHybridADJ=labels2colors(cutreeDynamic(hierADJ,distM= dissADJ, 
+                              cutHeight = 0.998, deepSplit=2, pamRespectsDendro = FALSE))
+
+# Plot results of all module detection methods together:
+png("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/wgcna/Gene dendrogram and module colors.png", width = 1000, height = 500)
+sizeGrWindow(10,5)
+plotDendroAndColors(dendro = hierADJ, 
+                    colors=data.frame(truemodule, colorStaticADJ, 
+                                     colorDynamicADJ, colorDynamicHybridADJ), 
+                    dendroLabels = FALSE, marAll = c(0.2, 8, 2.7, 0.2),
+                    main = "Gene dendrogram and module colors")
+dev.off()
+
+```
+
+```{r}
+# Calculate the dendrogram
+hierTOM = hclust(as.dist(dissTOM),method="average");
+# The reader should vary the height cut-off parameter h1 
+# (related to the y-axis of dendrogram) in the following
+colorStaticTOM = as.character(cutreeStaticColor(hierTOM, cutHeight=.99, minSize=20))
+colorDynamicTOM = labels2colors (cutreeDynamic(hierTOM,method="tree"))
+colorDynamicHybridTOM = labels2colors(cutreeDynamic(hierTOM, distM= dissTOM , cutHeight = 0.998,
+                       deepSplit=2, pamRespectsDendro = FALSE))
+# Now we plot the results
+sizeGrWindow(10,5)
+plotDendroAndColors(hierTOM, 
+               colors=data.frame(truemodule, colorStaticTOM, 
+                                 colorDynamicTOM, colorDynamicHybridTOM), 
+               dendroLabels = FALSE, marAll = c(1, 8, 3, 1),
+               main = "Gene dendrogram and module colors, TOM dissimilarity")
+```
+
+```{r}
+tabStaticADJ=table(colorStaticADJ,truemodule)
+tabStaticTOM=table(colorStaticTOM,truemodule)
+tabDynamicADJ=table(colorDynamicADJ, truemodule)
+tabDynamicTOM=table(colorDynamicTOM,truemodule)
+tabDynamicHybridADJ =table(colorDynamicHybridADJ,truemodule)
+tabDynamicHybridTOM =table(colorDynamicHybridTOM,truemodule)
+```
+
+```{r}
+randIndex(tabStaticADJ,adjust=F)
+randIndex(tabStaticTOM,adjust=F)
+randIndex(tabDynamicADJ,adjust=F)
+randIndex(tabDynamicTOM,adjust=F)
+randIndex(tabDynamicHybridADJ ,adjust=F)
+randIndex(tabDynamicHybridTOM ,adjust=F)
+```
+
+```{r}
+colorh1= colorDynamicHybridTOM
+# remove the dissimilarities, adjacency matrices etc to free up space
+rm(ADJ1); rm(dissADJ);              
+collectGarbage()
+save.image("Simulated-NetworkConstruction.RData")
+```
+
+```{r}
+datME=moduleEigengenes(datExpr,colorh1)$eigengenes
+signif(cor(datME, use="p"), 2)
+```
+
+```{r}
+
+dissimME=(1-t(cor(datME, method="p")))/2
+hclustdatME=hclust(as.dist(dissimME), method="average" )
+# Plot the eigengene dendrogram
+par(mfrow=c(1,1))
+plot(hclustdatME, main="Clustering tree based of the module eigengenes")
+```
+
+```{r}
+sizeGrWindow(8,9)
+plotMEpairs(datME,y=y)
+```
+
+```{r}
+
+signif(cor(datME, ModuleEigengeneNetwork1[,-1]),2)
+
+```
+
+
+```{r}
+sizeGrWindow(8,9)
+par(mfrow=c(3,1), mar=c(1, 2, 4, 1))
+which.module="turquoise"; 
+plotMat(t(scale(datExpr[,colorh1==which.module ]) ),nrgcols=30,rlabels=T,
+         clabels=T,rcols=which.module,
+         title=which.module )
+# for the second (blue) module we use
+which.module="blue";  
+plotMat(t(scale(datExpr[,colorh1==which.module ]) ),nrgcols=30,rlabels=T,
+         clabels=T,rcols=which.module,
+         title=which.module )
+which.module="brown"; 
+plotMat(t(scale(datExpr[,colorh1==which.module ]) ),nrgcols=30,rlabels=T,
+         clabels=T,rcols=which.module,
+         title=which.module )
+
+```
+
+
+
+```{r}
+
+sizeGrWindow(8,7);
+which.module="green"
+ME=datME[, paste("ME",which.module, sep="")]
+par(mfrow=c(2,1), mar=c(0.3, 5.5, 3, 2))
+plotMat(t(scale(datExpr[,colorh1==which.module ]) ),
+         nrgcols=30,rlabels=F,rcols=which.module,
+         main=which.module, cex.main=2)
+par(mar=c(5, 4.2, 0, 0.7))
+barplot(ME, col=which.module, main="", cex.main=2,
+        ylab="eigengene expression",xlab="array sample")
+```
+
+
+
+```{r}
+signif(cor(y,datME, use="p"),2)
+
+```
+
+```{r}
+cor.test(y, datME$MEbrown)
+
+```
+```{r}
+
+p.values = corPvalueStudent(cor(y,datME, use="p"), nSamples = length(y))
+
+GS1=as.numeric(cor(y,datExpr, use="p"))
+GeneSignificance=abs(GS1)
+# Next module significance is defined as average gene significance.
+ModuleSignificance=tapply(GeneSignificance, colorh1, mean, na.rm=T)
+```
+
+```{r}
+
+sizeGrWindow(8,7)
+par(mfrow = c(1,1))
+plotModuleSignificance(GeneSignificance,colorh1)
+
+collectGarbage()
+save.image("Simulated-RelatingToExt.RData")
+```
+
+
+
+
+```{r}
+# Define numbers of genes and samples
+nGenes = ncol(datMeth1);
+nSamples = nrow(datMeth1);
+# Recalculate MEs with color labels
+MEs0 = moduleEigengenes(datMeth1, moduleColors)$eigengenes
+MEs = orderMEs(MEs0)
+moduleTraitCor = cor(MEs, datTraits, use = "p");
+moduleTraitPvalue = corPvalueStudent(moduleTraitCor, nSamples);
+```
+
+```{r}
+
+```
+
+
+

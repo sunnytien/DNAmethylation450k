@@ -1,0 +1,315 @@
+# Dx associated DMPs
+
+```{r}
+load ("temp/functional_norm/methBioconductorWorkflow/GRsetPbmcColFunFlt.Rda")
+load ("temp/hm450annotations.rda")
+ann450kSub <- hm450annotations[match(featureNames(GRsetPbmcFunFlt),hm450annotations$Name),c(1:4,12:19,24:ncol(hm450annotations))] 
+pbmcDxDMPs <- DMPs(GRsetPbmcFunFlt,factor(pData(GRsetPbmcFunFlt)$Dx), ann450kSub)
+pbmcDxDMPs <- read.csv("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/pbmc/pbmcDxDMPs.csv", row.names = 4)
+pbmcDxDMPs_sig <- subset(pbmcDxDMPs, pbmcDxDMPs$adj.P.Val<0.05); dim(pbmcDxDMPs_sig)
+# [1]  0 33
+pbmcDxDMPs_sig_p05 <- subset(pbmcDxDMPs, pbmcDxDMPs$P.Value<0.05); dim(pbmcDxDMPs_sig_p05)
+# [1] 13617    33
+pbmcDxDMPs_sig_p001 <- subset(pbmcDxDMPs, pbmcDxDMPs$P.Value<0.001); dim(pbmcDxDMPs_sig_p001)
+# [1] 179  33
+```
+
+# Heatmap and boxplot
+```{r}
+# heatmap
+png("temp/functional_norm/methBioconductorWorkflow/pbmc/pbmcDxp001heatmap.png", height = 2000, width = 2000, res = 250)
+heatmapMeth(GRsetPbmcFunFlt, row.names(pbmcDxDMPs_sig_p001), pData(GRsetPbmcFunFlt)$Dx, pData(GRsetPbmcFunFlt)$BH, pData(GRsetPbmcFunFlt)$Gender)
+dev.off()
+
+# box plots
+library(ggplot2)
+# plot the top 4 most significantly differentially methylated CpGs 
+pbmcDxDMPs_sig_p001 <- pbmcDxDMPs_sig_p001[order(-pbmcDxDMPs_sig_p001$meanDiff),]
+dmp <- 1:16
+df <- cbind(as.data.frame(t(getBeta(GRsetPbmcFunFlt)[row.names(GRsetPbmcFunFlt)%in%rownames(pbmcDxDMPs_sig_p001)[dmp],])), pData(GRsetPbmcFunFlt)$BH, pData(GRsetPbmcFunFlt)$Dx) 
+
+colnames(df)[-c(dim(df)[2],dim(df)[2]-1)] <- pbmcDxDMPs_sig_p001[dmp,][,26]
+colnames(df)[which(duplicated(colnames(df)))] <- paste(colnames(df)[which(duplicated(colnames(df)))],"_1",sep="")
+colnames(df)[dim(df)[2]] <- "Dx"
+colnames(df)[dim(df)[2]-1] <- "BH"
+colnames(df) <- gsub("-","_",colnames(df))
+
+library(gridExtra)   
+png("temp/functional_norm/methBioconductorWorkflow/pbmc/pbmc_Dx001p_dmp1_16.png", height = 3000, width  =3000,res =250)
+
+plots = NULL
+for (cpg in colnames(df)[-c(dim(df)[2],dim(df)[2]-1)]) {
+        plots[[cpg]] = ggplot(df, aes_string("Dx", cpg)) + geom_boxplot(outlier.shape = NA) + geom_jitter(aes(color = df$BH))
+        }
+
+grid.arrange(plots[[1]],plots[[2]],plots[[3]],plots[[4]],
+             plots[[5]],plots[[6]],plots[[7]],plots[[8]],
+             plots[[9]],plots[[10]],plots[[11]],plots[[12]],
+             plots[[13]],plots[[14]],plots[[15]],plots[[16]],
+            ncol = 4)
+dev.off()
+```
+
+# Dx Gender and interaction assocaiated DMPs
+
+```{r}
+# Dx Gender interaction
+pData(GRsetPbmcFunFlt)$ibsGenInt <- interaction(pData(GRsetPbmcFunFlt)$Dx,pData(GRsetPbmcFunFlt)$Gender)
+pData(GRsetPbmcFunFlt)$ibsGenInt <- gsub("\\.","_", pData(GRsetPbmcFunFlt)$ibsGenInt)
+dmpsIntpbmc <- DMPsInt(GRsetPbmcFunFlt,factor(pData(GRsetPbmcFunFlt)$ibsGenInt), ann450kSub)
+
+mVals_p <- getM(GRsetPbmcFunFlt)
+head(mVals_p[,1:5])
+betaVals_p <- getBeta(GRsetPbmcFunFlt)
+head(betaVals_p[,1:5])
+
+# factor of interest
+Dx <- factor(pData(GRsetPbmcFunFlt)$Dx)
+Gender <- factor(pData(GRsetPbmcFunFlt)$Gender)
+
+# variable to correct for- coupld potenitally correct for age, but leave it out
+
+# use the above to create a design matrix
+design <- model.matrix(~ 0 + Dx:Gender, data=pData(GRsetPbmcFunFlt))
+colnames(design) <- c("HC_F", "IBS_F", "HC_M", "IBS_M")
+
+# fit the linear model 
+fit <- lmFit(mVals_p, design)
+
+# create a contrast matrix for specific comparisons
+contMatrix <- makeContrasts(IBS_M-HC_M, IBS_F-HC_F,IBS_M-IBS_F, HC_M-HC_F,   levels=design)
+contMatrix
+
+# fit the contrasts
+fit2 <- contrasts.fit(fit, contMatrix)
+fit2 <- eBayes(fit2)
+
+# look at the numbers of DM CpGs at FDR < 0.05
+summary(decideTests(fit2))
+
+# IBS_M - HC_M IBS_F - HC_F IBS_M - IBS_F HC_M - HC_F
+# -1            0            2         17882         416
+# 0        420242       420255        379977      419804
+# 1            15            0         22398          37
+
+# get the table of results for the first contrast (naive - rTreg)
+ann450kSub <- hm450annotations[match(rownames(mVals_p),hm450annotations$Name),
+                      c(1:4,12:19,24:ncol(hm450annotations))]
+DMPs_IBS_M_HC_M <-  topTable(fit2, num=Inf, coef=1, genelist=ann450kSub)
+DMPs_IBS_M_HC_M$meanDiff <- rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$ibsGenInt ==  "IBS_M"))])-rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$ibsGenInt ==  "HC_M"))])
+
+DMPs_IBS_F_HC_F <-  topTable(fit2, num=Inf, coef=2, genelist=ann450kSub)
+DMPs_IBS_F_HC_F$meanDiff <- rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$ibsGenInt ==  "IBS_F"))])-rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$ibsGenInt ==  "HC_F"))])
+
+DMPs_IBS_M_IBS_F <-  topTable(fit2, num=Inf, coef=3, genelist=ann450kSub)
+DMPs_IBS_M_IBS_F$meanDiff <- rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$ibsGenInt ==  "IBS_M"))])-rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$ibsGenInt ==  "IBS_F"))])
+
+DMPs_HC_M_HC_F <- topTable(fit2, num=Inf, coef=4, genelist=ann450kSub)
+DMPs_HC_M_HC_F$meanDiff <- rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$ibsGenInt ==  "HC_M"))])-rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$ibsGenInt ==  "HC_F"))])
+
+# remove HC Gender probes from IBS
+DMPs_IBS_M_IBS_F_sig <- subset(DMPs_IBS_M_IBS_F, DMPs_IBS_M_IBS_F$adj.P.Val<0.05); dim(DMPs_IBS_M_IBS_F_sig)
+# [1] 40280    33
+
+DMPs_HC_M_HC_F_sig <- subset(DMPs_HC_M_HC_F, DMPs_HC_M_HC_F$adj.P.Val<0.05); dim(DMPs_HC_M_HC_F_sig)
+# [1] 453  33
+
+DMPs_HC_M_HC_F_sig <- subset(DMPs_HC_M_HC_F, DMPs_HC_M_HC_F$P.Value<0.05); dim(DMPs_HC_M_HC_F_sig)
+# [1] 30448    33
+
+
+DMPs_IBS_M_IBS_F_sig1 <- DMPs_IBS_M_IBS_F_sig[!row.names(DMPs_IBS_M_IBS_F_sig)%in%row.names(DMPs_HC_M_HC_F_sig),]; dim(DMPs_IBS_M_IBS_F_sig1)
+
+
+```
+
+```{r}
+
+pbmcGenderDMPs <- DMPs(GRsetPbmcFunFlt,factor(pData(GRsetPbmcFunFlt)$Gender), ann450kSub)
+pbmcGenderDMPs_sig <- subset(pbmcGenderDMPs, pbmcGenderDMPs$adj.P.Val<0.05); dim(pbmcGenderDMPs_sig)
+# [1] 9996   33
+```
+
+```{r}
+DMPs_IBS_M_IBS_F_sig2 <- DMPs_IBS_M_IBS_F_sig1[!row.names(DMPs_IBS_M_IBS_F_sig1)%in%row.names(pbmcGenderDMPs_sig),]; dim(DMPs_IBS_M_IBS_F_sig2)
+# [1] 30821    33
+
+DMPs_IBS_M_IBS_F_sig3 <- subset(DMPs_IBS_M_IBS_F_sig2, DMPs_IBS_M_IBS_F_sig2$adj.P.Val<0.01);dim(DMPs_IBS_M_IBS_F_sig3)
+# [1] 5788   33
+
+DMPs_IBS_M_IBS_F_sig3 <- subset(DMPs_IBS_M_IBS_F_sig2, DMPs_IBS_M_IBS_F_sig2$meanDiff>=0.02|DMPs_IBS_M_IBS_F_sig2$meanDiff< -0.02); dim(DMPs_IBS_M_IBS_F_sig3)
+# [1] 3439   33
+save(DMPs_IBS_M_IBS_F_sig3, file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/pbmc/DMPs_IBS_M_IBS_F_sig3.rda")
+
+write.csv(DMPs_IBS_M_IBS_F_sig3, file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/pbmc/DMPs_IBS_M_IBS_F_sig3_3439.csv")
+
+```
+
+```{r}
+## same results from making an interaction variable.
+
+
+
+dmpsIntpbmc <- read.csv("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/pbmc/dmpsIntpbmc.csv", row.names = 4)
+
+ibs_m_f_sig <- subset(dmpsIntpbmc[[3]], dmpsIntpbmc[[3]]$adj.P.Val<0.05); dim(ibs_m_f_sig)
+# [1] 40280    33
+hc_m_f_sig <- subset(dmpsIntpbmc[[4]], dmpsIntpbmc[[4]]$adj.P.Val<0.05); dim(hc_m_f_sig)
+# # [1] 453  33 
+ibs_m_f_sig1 <- ibs_m_f_sig[!row.names(ibs_m_f_sig)%in%row.names(hc_m_f_sig),]; dim(ibs_m_f_sig1)
+# # [1] 39990    33
+
+## very few gender differences in HC compared to IBS.use p value instead to remove as many gender assocaited probes as possible.
+hc_m_f_sig <- subset(dmpsIntpbmc[[4]], dmpsIntpbmc[[4]]$P.Value<0.05); dim(hc_m_f_sig)
+# [1] 30448    33
+ibs_m_f_sig1 <- ibs_m_f_sig[!row.names(ibs_m_f_sig)%in%row.names(hc_m_f_sig),]; dim(ibs_m_f_sig1)
+# [1] 37363    33
+
+# IBS HC differences within 1. Women 2. men
+f_ibs_hc_sig <- subset(dmpsIntpbmc[[1]], dmpsIntpbmc[[1]]$adj.P.Val<0.05); dim(f_ibs_hc_sig)
+# [1]  2 33
+m_ibs_hc_sig<- subset(dmpsIntpbmc[[2]], dmpsIntpbmc[[2]]$adj.P.Val<0.05); dim(m_ibs_hc_sig)
+# [1] 15 33
+
+## try to remove general gender differences
+ibs_m_f_sig2 <- ibs_m_f_sig[!row.names(ibs_m_f_sig)%in%row.names(pbmcGenderDMPs_sig),]; dim(ibs_m_f_sig2)
+# [1] 31759    33 
+ibs_m_f_sig3 <- ibs_m_f_sig2[!row.names(ibs_m_f_sig2)%in%row.names(hc_m_f_sig),]; dim(ibs_m_f_sig3)
+# [1] 30821    33 ### final
+
+ibs_m_f_sig3fdr01 <- subset(ibs_m_f_sig3, ibs_m_f_sig3$adj.P.Val<0.01); dim(ibs_m_f_sig3fdr01)
+# [1] 5788   33
+
+# ibs_m_f_sig3fdr01md <- subset(ibs_m_f_sig3fdr01, ibs_m_f_sig3fdr01$meanDiff >0.3 | ibs_m_f_sig3fdr01$meanDiff < -0.3); dim(ibs_m_f_sig3fdr01md )
+
+```
+
+```{r setup}
+# Set working directory outside the chunks
+knitr::opts_knit$set(root.dir = normalizePath("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/"))
+```
+
+```{r}
+#################### save the results
+
+write.table(pbmcDxDMPs, file="temp/functional_norm/methBioconductorWorkflow/pbmc/pbmcDxDMPs.csv", sep=",", row.names=FALSE)
+
+write.table(pbmcDxDMPs_sig_p001, file="temp/functional_norm/methBioconductorWorkflow/pbmc/pbmcDxDMPs_sig_p001.csv", sep=",", row.names=FALSE)
+
+write.table(pbmcGenderDMPs, file="temp/functional_norm/methBioconductorWorkflow/pbmc/pbmcGenderDMPs.csv", sep=",", row.names=FALSE)
+
+write.table(dmpsIntpbmc, file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/pbmc/dmpsIntpbmc.csv", sep=",", row.names=FALSE)
+
+write.table(f_ibs_hc_sig, file="temp/functional_norm/methBioconductorWorkflow/pbmc/pbmc_f_ibs_hc_sig.csv", sep=",", row.names=FALSE)
+
+write.table(m_ibs_hc_sig, file="temp/functional_norm/methBioconductorWorkflow/pbmc/pbmc_m_ibs_hc_sig.csv", sep=",", row.names=FALSE)
+
+write.table(ibs_m_f_sig2, file="temp/functional_norm/methBioconductorWorkflow/pbmc/pbmc_ibs_m_f_sig2.csv", sep=",", row.names=FALSE)
+
+write.table(ibs_m_f_sig3, file="temp/functional_norm/methBioconductorWorkflow/pbmc/pbmc_ibs_m_f_sig_final.csv", sep=",", row.names=FALSE)
+
+write.table(pbmcGenderDMPs_sig, file="temp/functional_norm/methBioconductorWorkflow/pbmc/pbmcGenderDMPs_sig.csv", sep=",", row.names=FALSE)
+
+write.table(pbmcDxDMPs_sig_p05, file="temp/functional_norm/methBioconductorWorkflow/pbmc/pbmcDxDMPs_sig_p05.csv", sep=",", row.names=FALSE)
+
+
+save(dmpsIntpbmc , file = "temp/functional_norm/methBioconductorWorkflow/pbmc/pbmc_dmpsIntpbmc.rda")
+```
+# Sectioning the data to look at interactions. With limma, since the variance of all the genes over all subjects are used in ebayes DE, using all the samples is recommended. Hence this section was not used.
+```{r}
+
+# GRsetPbmcFunFlt.f <- GRsetPbmcFunFlt[,pData(GRsetColFunFlt)$Gender == "F"]
+# GRsetPbmcFunFlt.m <- GRsetPbmcFunFlt[,pData(GRsetColFunFlt)$Gender == "M"]
+# GRsetPbmcFunFlt.ibs <- GRsetPbmcFunFlt[,pData(GRsetColFunFlt)$Dx == "IBS"]
+# GRsetPbmcFunFlt.hc <- GRsetPbmcFunFlt[,pData(GRsetColFunFlt)$Dx == "HC"]
+# pbmcDxDMPsF <- DMPs(GRsetPbmcFunFlt.f,factor(pData(GRsetPbmcFunFlt.f)$Dx), ann450kSub)
+# pbmcDxDMPsM <- DMPs(GRsetPbmcFunFlt.m,factor(pData(GRsetPbmcFunFlt.m)$Dx), ann450kSub)
+# pbmcGenderDMPsibs <- DMPs(GRsetPbmcFunFlt.ibs,factor(pData(GRsetPbmcFunFlt.ibs)$Gender), ann450kSub)
+# pbmcGenderDMPshc <- DMPs(GRsetPbmcFunFlt.hc,factor(pData(GRsetPbmcFunFlt.hc)$Gender), ann450kSub)
+# pbmcGenderDMPsibs.sig <- pbmcGenderDMPsibs[pbmcGenderDMPsibs$adj.P.Val<0.05,]; dim(pbmcGenderDMPsibs.sig)
+# pbmcGenderDMPshc.sig <- pbmcGenderDMPshc[pbmcGenderDMPshc$adj.P.Val<0.05,]; dim(pbmcGenderDMPshc.sig )
+# pbmcGenderDMPs.sig <- pbmcGenderDMPs[pbmcGenderDMPs$adj.P.Val<0.05,]
+# ibsNonGenderDmps <- pbmcGenderDMPsibs.sig[!row.names(pbmcGenderDMPsibs.sig)%in%row.names(pbmcGenderDMPs.sig),]
+# hcNonGenderDmps <- pbmcGenderDMPshc.sig[!row.names(pbmcGenderDMPshc.sig)%in%row.names(pbmcGenderDMPs.sig),]
+# write.table(pbmcDxDMPsF, file="C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/pbmcDxDMPsF.csv", sep=",", row.names=FALSE)
+# write.table(pbmcDxDMPsM, file="C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/pbmcDxDMPsM.csv", sep=",", row.names=FALSE)
+# write.table(pbmcGenderDMPsibs, file="C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/pbmcGenderDMPsibs.csv", sep=",", row.names=FALSE)
+# write.table(pbmcGenderDMPshc, file="C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/pbmcGenderDMPshc.csv", sep=",", row.names=FALSE)
+# 
+# write.table(ibsNonGenderDmps, file="C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/ibsNonGenderDmps_pbmc.csv", sep=",", row.names=FALSE)
+# 
+# write.table(pbmcGenderDMPs, file="C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/pbmcGenderDMPs.sig.csv", sep=",", row.names=FALSE)
+
+```
+# heatmap and plot top CpGs
+
+```{r}
+
+# heatmap 
+# DMPs_IBS_M_IBS_F_sig3_md <- subset(DMPs_IBS_M_IBS_F_sig3, DMPs_IBS_M_IBS_F_sig3$meanDiff<= -0.0397 | DMPs_IBS_M_IBS_F_sig3$meanDiff >= 0.0397); dim(DMPs_IBS_M_IBS_F_sig3_md)
+DMPs_IBS_M_IBS_F_sig3_md <- DMPs_IBS_M_IBS_F_sig3_md[order(-abs(DMPs_IBS_M_IBS_F_sig3_md$meanDiff)),][1:500,]
+## ibs-dx int
+GRsetPbmcFunFlt.ibs <- GRsetPbmcFunFlt[,pData(GRsetPbmcFunFlt)$Dx == "IBS"]
+GRsetPbmcFunFlt.ibsm <- GRsetPbmcFunFlt.ibs[,pData(GRsetPbmcFunFlt.ibs)$Gender == "M"]
+GRsetPbmcFunFlt.ibsf <- GRsetPbmcFunFlt.ibs[,pData(GRsetPbmcFunFlt.ibs)$Gender == "F"]
+png("temp/functional_norm/methBioconductorWorkflow/pbmc/pbmcibsGenInthmMD500_ibsF.png", height = 2000, width = 2000, res = 250)
+hm <- heatmapMeth(GRsetPbmcFunFlt.ibsf, row.names(DMPs_IBS_M_IBS_F_sig3_md), pData(GRsetPbmcFunFlt.ibsf)$Gender, pData(GRsetPbmcFunFlt.ibsf)$BH, pData(GRsetPbmcFunFlt.ibsf)$Dx)
+dev.off()
+row.order <- rev(hm$rowInd)
+DMPs_IBS_M_IBS_F_sig3_md1 <- DMPs_IBS_M_IBS_F_sig3_md[row.order,]
+
+
+ ## STOP  important## before running the nexr command change the function to not sort on the rows.
+```
+
+```{r}
+png("temp/functional_norm/methBioconductorWorkflow/pbmc/pbmcibsGenInthmMD500_ibsM.png", height = 2000, width = 2000, res = 250)
+hm1 <- heatmapMeth(GRsetPbmcFunFlt.ibsm, row.names(DMPs_IBS_M_IBS_F_sig3_md1), pData(GRsetPbmcFunFlt.ibsm)$Gender, pData(GRsetPbmcFunFlt.ibsm)$BH, pData(GRsetPbmcFunFlt.ibsm)$Gender)
+dev.off()
+
+
+GRsetPbmcFunFlt.hc <- GRsetPbmcFunFlt[,pData(GRsetPbmcFunFlt)$Dx == "HC"]
+GRsetPbmcFunFlt.hcm <- GRsetPbmcFunFlt.hc[,pData(GRsetPbmcFunFlt.hc)$Gender == "M"]
+GRsetPbmcFunFlt.hcf <- GRsetPbmcFunFlt.hc[,pData(GRsetPbmcFunFlt.hc)$Gender == "F"]
+png("temp/functional_norm/methBioconductorWorkflow/pbmc/pbmcibsGenInthmMD500_hcF.png", height = 2000, width = 2000, res = 250)
+hm1 <- heatmapMeth(GRsetPbmcFunFlt.hcf, row.names(DMPs_IBS_M_IBS_F_sig3_md1), pData(GRsetPbmcFunFlt.hcf)$Gender, pData(GRsetPbmcFunFlt.hcf)$BH, pData(GRsetPbmcFunFlt.hcf)$Dx)
+dev.off()
+png("temp/functional_norm/methBioconductorWorkflow/pbmc/pbmcibsGenInthmMD500_hcM.png", height = 2000, width = 2000, res = 250)
+hm1 <- heatmapMeth(GRsetPbmcFunFlt.hcm, row.names(DMPs_IBS_M_IBS_F_sig3_md1), pData(GRsetPbmcFunFlt.hcm)$Gender, pData(GRsetPbmcFunFlt.hcm)$BH, pData(GRsetPbmcFunFlt.hcm)$Dx)
+dev.off()
+
+# png("temp/functional_norm/methBioconductorWorkflow/pbmc/pbmchcGenInthm1402_hc.png", height = 2000, width = 2000, res = 250)
+# hm1 <- heatmapMeth(GRsetPbmcFunFlt.hc, row.names(ibs_m_f_sig3fdr01md1), pData(GRsetPbmcFunFlt.hc)$Gender, pData(GRsetPbmcFunFlt.hc)$BH, pData(GRsetPbmcFunFlt.hc)$Gender)
+# dev.off()
+## Imp, change the rowv back to T
+```
+# Box plot
+```{r}
+
+library(ggplot2)
+# plot the top 4 most significantly differentially methylated CpGs 
+ibs_m_f_sig3fdr01md_bar<- ibs_m_f_sig3fdr01md[order(-ibs_m_f_sig3fdr01md$meanDiff),]
+dmp <- 1:16
+df <- cbind(as.data.frame(t(getBeta(GRsetPbmcFunFlt)[row.names(GRsetPbmcFunFlt)%in%rownames(ibs_m_f_sig3fdr01md_bar)[dmp],])), pData(GRsetPbmcFunFlt)$BH, pData(GRsetPbmcFunFlt)$ibsGenInt) 
+
+colnames(df)[-c(dim(df)[2],dim(df)[2]-1)] <- ibs_m_f_sig3fdr01md_bar[dmp,][,26]
+colnames(df)[which(duplicated(colnames(df)))] <- paste(colnames(df)[which(duplicated(colnames(df)))],"_1",sep="")
+colnames(df)[dim(df)[2]] <- "ibsGenInt"
+colnames(df)[dim(df)[2]-1] <- "BH"
+colnames(df) <- gsub("-","_",colnames(df))
+
+library(gridExtra)   
+png("temp/functional_norm/methBioconductorWorkflow/pbmc/pbmc_int_top16md.png", height = 3000, width  =3000,res =250)
+plots = NULL
+for (cpg in colnames(df)[-c(dim(df)[2],dim(df)[2]-1)]) {
+        plots[[cpg]] = ggplot(df, aes_string("ibsGenInt", cpg)) + geom_boxplot(outlier.shape = NA) + geom_jitter(aes(color = df$BH))
+        }
+
+grid.arrange(plots[[1]],plots[[2]],plots[[3]],plots[[4]],
+             plots[[5]],plots[[6]],plots[[7]],plots[[8]],
+             plots[[9]],plots[[10]],plots[[11]],plots[[12]],
+             plots[[13]],plots[[14]],plots[[15]],plots[[16]],
+            ncol = 4)
+dev.off()
+
+```

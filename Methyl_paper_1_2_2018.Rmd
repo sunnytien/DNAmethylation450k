@@ -1,0 +1,133 @@
+---
+title: "Methyl_paper_1_2_2018"
+author: "Swapna Mahurkar-Joshi"
+date: "January 2, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Genome-wide DNA Methylation and Gene Expression of Colonic Mucosa and Peripheral Blood Mononuclear Cells Reveal Stress Associated and Neuronal Genes to be Epigenetically Deregulated in IBS
+
+This is the script for the data and the figures in the paper.
+
+# Libraries
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# source("https://bioconductor.org/biocLite.R")
+# biocLite("MASS")
+library(ggplot2)
+library(scater)
+library(limma)
+library(minfi)
+library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+library(IlluminaHumanMethylation450kmanifest)
+library(RColorBrewer)
+library(missMethyl)
+library(matrixStats)
+library(Gviz)
+library(DMRcate)
+library(stringr)
+library(methylationArrayAnalysis)
+library(FDb.InfiniumMethylation.hg19)
+library(RColorBrewer)
+library(Gviz)
+library(GenomicRanges)
+library(DMRcate)
+```
+# Set the working directory
+
+```{r setup}
+# Set working directory outside the chunks
+knitr::opts_knit$set(root.dir = normalizePath("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/"))
+
+```
+# PBMCs
+
+## PBMCs:DMPs between IBS and HCs
+
+```{r}
+load("temp1/res3_functional_norm/methBioconductorWorkflow/GRsetPbmcColFunFlt.Rda")
+load("data1/consistant_data/hm450annotations.rda")
+ann450kSub <- hm450annotations[match(featureNames(GRsetPbmcFunFlt),hm450annotations$Name),c(1:4,12:19,24:ncol(hm450annotations))] 
+pbmcDxDMPs <- dmpFinder(getM(GRsetPbmcFunFlt),pData(GRsetPbmcFunFlt)$Dx, type = "categorical", qCutoff = 1, shrinkVar = TRUE)
+```
+```{r}
+pbmcDxDMPs_sig <- subset(pbmcDxDMPs, pbmcDxDMPs$qval<0.05); dim(pbmcDxDMPs_sig)
+# [1]  0 33
+pbmcDxDMPs_sig_p05 <- subset(pbmcDxDMPs, pbmcDxDMPs$pval<0.05); dim(pbmcDxDMPs_sig_p05)
+# [1] 13617    33
+pbmcDxDMPs_sig_p001 <- subset(pbmcDxDMPs, pbmcDxDMPs$pval<0.001); dim(pbmcDxDMPs_sig_p001)
+# [1] 179  33
+cpgs <- rownames(pbmcDxDMPs_sig_p001)[1:4]
+par(mfrow=c(2,2))
+plotCpg(getBeta(GRsetPbmcFunFlt), cpg=cpgs, pheno=pData(GRsetPbmcFunFlt)$Dx)
+ggplot(aes())
+```
+
+```{r setup}
+# Set working directory outside the chunks
+knitr::opts_knit$set(root.dir = normalizePath("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/Methyl_paper_1_2_2018"))
+```
+
+#  PBMCs:DMRs between IBS and HCs
+
+```{r}
+targets <- pData(GRsetPbmcFunFlt)
+dx <- factor(targets$Dx)
+design <- model.matrix(~0+dx, data=targets)
+colnames(design) <- levels(dx)
+contMatrix <- makeContrasts(IBS-HC,   levels=design)
+contMatrix
+```
+```{r}
+myAnnotation <- cpg.annotate(object = getM(GRsetPbmcFunFlt), datatype = "array", what = "M", analysis.type = "differential", design = design, contrasts = TRUE, cont.matrix = contMatrix, coef = "IBS - HC", arraytype = "450K")
+str(myAnnotation)
+DMRs <- dmrcate(myAnnotation, lambda=1000, C=2, pcutoff = 0.001)
+head(DMRs$results); dim(DMRs$results)
+DMRsInt<- DMRs$results[order(-DMRs$results$no.cpgs),]
+```
+```{r}
+results.ranges <- extractRanges(DMRs, genome = "hg19")
+write.csv(results.ranges, file = "PbmcDMRs_p001.csv")
+save(results.ranges, file = "PbmcDMRs_p001.rda")
+```
+```{r}
+# draw the plot for the top DMR
+# set up the grouping variables and colors
+pal <- brewer.pal(3,"Dark2")
+groups <- pal[1:length(unique(targets$Dx))]
+names(groups) <- levels(factor(targets$Dx))
+cols <- groups[as.character(factor(targets$Dx))]
+samps <- 1:nrow(targets)
+png("temp/functional_norm/methBioconductorWorkflow/pbmc/PbmcDxDMR1.png", height = 2000, width = 2000, res = 250)
+DMR.plot(ranges=results.ranges, dmr=1, CpGs=getBeta(GRsetPbmcFunFlt), phen.col=cols, what = "Beta",      arraytype = "450K", pch=16, toscale=TRUE, plotmedians=TRUE,   genome="hg19", samps=samps)
+dev.off()
+``
+## PBMCs:DMPs and DMRs between IBS-C and HCs; IBS-D and HCs; IBS-M and HCs:
+## PBMCs:IBS-Sex interaction: 
+## PBMCs:IBS-Sex interaction ANOVA:
+## PBMCs:Men-Women differences within IBS
+## PBMCs:Men-Women differences within HCs
+## PBMCs:Stress related genes: 
+## PBMCs:HPA axis: 
+## PBMCs:GR inducible and GR repressed: 
+## PBMCs:Gene expression changes associated with genes associated with IBS, BH subtypes or IBS-Sex interactions:
+## PBMCs:Functional annotation of the genes:
+
+# Colon
+## Colon:DMPs and DMRs between IBS and HCs: 
+## Colon:DMPs and DMRs between IBS-C and HCs; IBS-D and HCs; IBS-M and HCs:
+## Colon:IBS-Sex interaction: 
+## Colon:IBS-Sex interaction ANOVA:
+## Colon:Men-Women differences within IBS
+## Colon:Men-Women differences within HCs
+## Colon:Stress related genes: 
+## Colon:HPA axis: 
+## Colon:GR inducible and GR repressed: 
+## Colon:Gene expression changes associated with genes associated with IBS, BH subtypes or IBS-Sex interactions:
+## Colon:Functional annotation of the genes:
+
+

@@ -1,0 +1,49 @@
+---
+title: "Methylumi"
+author: "Swapna Mahurkar-Joshi"
+date: "February 9, 2017"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+# require(knitr)
+# opts_knit$set(root.dir = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/DNA_meth/DNA_methylation_02062017/")
+```
+
+```{r Installation}
+# source("https://bioconductor.org/biocLite.R")
+# biocLite(c("methylumi","FDb.InfiniumMethylation.hg19"))
+# 
+# source("https://bioconductor.org/biocLite.R")
+# biocLite(c("digest","AnnotationDbi"))
+```
+
+#creating a methylumi object/reading idat files
+```{r pressure, echo=FALSE}
+suppressPackageStartupMessages(require('methylumi'))
+suppressPackageStartupMessages(require('FDb.InfiniumMethylation.hg19'))
+
+#Read Idat files
+idatPath <- ("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/DNA_meth/DNA_methylation_02062017/2016-9117 Chang Meth 450/2016-9117 iScans/Idat_all")
+
+mset450k <- methylumIDAT(getBarcodes(path=idatPath), idatPath=idatPath)
+save(mset450k, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/DNA_meth/DNA_methylation_02062017/Methylumi_analysis/mset450k.rda")
+show(mset450k)
+```
+
+#Preprocessing the raw data in methylumi
+```{r}
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/DNA_meth/DNA_methylation_02062017/Methylumi_analysis/mset450k.rda")
+mset450k.proc <- stripOOB(normalizeMethyLumiSet(methylumi.bgcorr(mset450k)))
+save(mset450k.proc, file= "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/DNA_meth/DNA_methylation_02062017/Methylumi_analysis/mset450k.proc.rda")
+```
+
+
+# QC plots
+```{r}
+library(ggplot2)
+p <- qc.probe.plot(mset450k, by.type=TRUE)
+print(p)
+ggsave(p, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/DNA_meth/DNA_methylation_02062017/Methylumi_analysis/Controls_450k.png")
+```

@@ -1,0 +1,690 @@
+---
+title: "DNA_meth_preproc_V1"
+author: "Swapna Mahurkar-Joshi"
+date: "February 8, 2017"
+output: word_document
+---
+
+```{r, warning=FALSE, message=FALSE}
+source("http://bioconductor.org/biocLite.R")
+biocLite(c("minfi","DNAcopy", "impute", "marry", "limma", "preprocessCore","RPMM"))
+library(c(minfi,randomForest))
+```
+
+<!-- Preporcessing performed outside Rstudio due to memory limitations -->
+
+# Minfi package
+```{r}
+source("https://bioconductor.org/biocLite.R")
+biocLite("IlluminaHumanMethylation450kmanifest")
+
+source("https://bioconductor.org/biocLite.R")
+biocLite("IlluminaHumanMethylation450kanno.ilmn12.hg19")
+
+source("https://bioconductor.org/biocLite.R")
+biocLite("shinyMethyl")
+```
+
+```{r}
+library('minfi')
+#Read Idat files
+idatPath <- ("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/DNA_meth/DNA_methylation_02062017/Methylumi_analysis/Idat_all")
+
+list.files(idatPath)
+target1 <- read.delim("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/DNA_meth/DNA_methylation_02062017/Methylumi_analysis/Idat_all/SampleSheet.txt", as.is = TRUE); dim(target1)
+names(target1)
+target1$Basename
+# target1$Basename <- file.path(idatPath, target1$Basename)
+target1$BH <- gsub("U", "M", target1$BH)
+rgset <- read.450k(target1$Basename, verbose = TRUE)
+save(rgset, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/DNA_meth/DNA_methylation_02062017/Minfi_analysis/rgset.rda")
+row.names(target1) <- target1$Basename
+pData(rgset) <- target1
+dim(getRed(rgset))
+#[1] 622399    288
+dim(getGreen(rgset))
+#[1] 622399    288
+
+```
+#rgset to Methylset; no normalization at this stage
+```{r}
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/data/technicallyCorrectData/rgset.rda")
+mset_raw <- preprocessRaw(rgset)
+save(mset_raw,"C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/data/technicallyCorrectData/mset_raw.rda")
+```
+
+```{r}
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/data1/code_output/analysis2/mset_raw.rda")
+ratioSet <- ratioConvert(mset_raw, what = "both", keepCN = TRUE)
+
+save(ratioSet,file= "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/data/technicallyCorrectData/ratioSet.rda")
+```
+
+```{r}
+raw_beta <- getBeta(ratioSet)
+gset <- mapToGenome(ratioSet)
+gset
+save(gset,file= "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/data/technicallyCorrectData/gset.rda")
+```
+
+```{r, QC, message = FALSE}
+library(ggplot2)
+qc <- getQC(mset_raw)
+plotQC(qc)
+ggsave(plotQC(qc), file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/QC/qc1.png")
+
+png("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/QC/densityPlot.png")
+densityPlot(mset_raw, sampGroups = pData(mset_raw)$Tissue)
+dev.off()
+
+qcReport(rgset, pdf= "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/QC/qcReport.pdf")
+
+mds.dx <- randomForest(Tissue ~ ., t(getBeta(mset_raw)), proximity=TRUE, keep.forest=FALSE)
+MDSplot(mds.dx, col.var = pData(mset_raw)$Dx)
+MDSplot(t(getBeta(mset_raw)), col.var = pData(mset_raw)$Tissue)
+```
+
+Normalizations: Quantile vs functional
+
+```{r}
+
+# Quantile normalization: when no global methylation differences are expected, this is the best method
+
+rgsetPbmc <- rgset[,grep("_P",pData(rgset)$External.Sample.ID)]
+rgsetCol <- rgset[,grep("_B",pData(rgset)$External.Sample.ID)]
+
+save(rgsetPbmc, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/data/technicallyCorrectData/rgsetPbmc.rda")
+save(rgsetCol, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/data/technicallyCorrectData/rgsetCol.rda")
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/data1/code_output/analysis2/rgsetPbmc.rda")
+pbmc.gset.quantile <- preprocessQuantile(rgsetPbmc, fixOutliers = TRUE, removeBadSamples = TRUE, badSampleCutoff = 10.5,
+quantileNormalize = TRUE, stratified = TRUE, mergeManifest = FALSE, sex = NULL)
+col.gset.quantile <- preprocessQuantile(rgsetCol, fixOutliers = TRUE, removeBadSamples = TRUE, badSampleCutoff = 10.5,
+quantileNormalize = TRUE, stratified = TRUE, mergeManifest = FALSE, sex = NULL)
+
+save(pbmc.gset.quantile, file = "pbmc.gset.quantile.rda")
+save(col.gset.quantile, file = "col.gset.quantile.rda")
+
+
+# Functional normalization:when global differences are expected
+sampleNames(rgset) <- pData(rgset)[,11]
+GRset.funnorm <- preprocessFunnorm(rgset)
+save(GRset.funnorm, file = "GRset.funnorm.rda")
+
+
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/data/technicallyCorrectData/pbmc.gset.quantile.rda")
+
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/data/technicallyCorrectData/col.gset.quantile.rda")
+
+# MDS plots
+png("MDSplots_quant_fun_norms.png", height = 2000, width = 1800, res = 300)
+par(mfrow = c(3, 2))
+# Following preprocessRaw()
+mdsPlot(getM(pbmc.gset.quantile), 
+        numPositions = 1000, 
+       sampGroups = pData(pbmc.gset.quantile)$Dx,
+        sampNames = pData(pbmc.gset.quantile)$NDP,
+        legendPos = "top",
+        main = "preprocessQuantilePBMC")
+# Following preprocessQuantile()
+mdsPlot(getM(col.gset.quantile), 
+        numPositions = 1000, 
+        sampGroups = pData(col.gset.quantile)$Dx,
+        # sampNames = pData(col.gset.quantile)$NDP,
+        legendPos = "topright",
+        main = "preprocessQuantileColon")
+
+# sex pbmc
+
+png("MDSsexPBMCQuant.png")
+mdsPlot(getM(pbmc.gset.quantile), 
+        sampGroups = pData(pbmc.gset.quantile)$Gender,
+        sampNames = pData(pbmc.gset.quantile)$NDP,
+        legendPos = "top",
+        main = "preprocessQuantSexPBMC")
+
+dev.off()
+
+# sex col
+png("MDSsexColQuant.png")
+mdsPlot(getM(col.gset.quantile), 
+        numPositions = 1000, 
+        sampGroups = pData(col.gset.quantile)$Gender,
+        sampNames = pData(col.gset.quantile)$NDP,
+        legendPos = "top",
+        main = "preprocessQuantSexCol")
+
+dev.off()
+
+
+# Following preprocessFunnorm()
+mdsPlot(getM(GRset.funnorm), 
+        numPositions = 1000, 
+         sampGroups = pData(GRset.funnorm)$Tissue,
+        # sampNames = pData(GRset.funnorm)$NDP,
+        legendPos = "bottomleft",
+        main = "preprocessFunnorm")
+
+
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/data1/code_output/analysis2/GRset.funnorm.rda")
+# separate colon and pbmc
+GRset.funnorm.pbmc <- GRset.funnorm[,grep("_P",pData(GRset.funnorm)$External.Sample.ID)]
+GRset.funnorm.col <- GRset.funnorm[,grep("_B",pData(GRset.funnorm)$External.Sample.ID)]
+
+save(GRset.funnorm.pbmc, GRset.funnorm.col, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/data/technicallyCorrectData/GRset.funnorm.col.pbmc.Rda")
+
+# pbmc
+mdsPlot(getM(GRset.funnorm.pbmc), 
+        numPositions = 1000, 
+        sampGroups = pData(GRset.funnorm.pbmc)$Dx,
+        # sampNames = pData(GRset.funnorm)$NDP,
+        legendPos = "bottomleft",
+        main = "preprocessFunnormPBMC")
+
+# col
+mdsPlot(getM(GRset.funnorm.col), 
+        numPositions = 1000, 
+        sampGroups = pData(GRset.funnorm.col)$Dx,
+        # sampNames = pData(GRset.funnorm)$NDP,
+        legendPos = "bottomleft",
+        main = "preprocessFunnormColon")
+
+dev.off()
+
+
+# sex pbmc
+png("MDSsexPBMC.png")
+mdsPlot(getM(GRset.funnorm.pbmc), 
+        numPositions = 1000, 
+        sampGroups = pData(GRset.funnorm.pbmc)$Gender,
+        # sampNames = pData(GRset.funnorm)$NDP,
+        legendPos = "bottomleft",
+        main = "preprocessFunnormPBMC")
+
+dev.off()
+
+png("MDSsexCol.png")
+mdsPlot(getM(GRset.funnorm.col), 
+        numPositions = 1000, 
+        sampGroups = pData(GRset.funnorm.col)$Gender,
+        # sampNames = pData(GRset.funnorm)$NDP,
+        legendPos = "bottomleft",
+        main = "preprocessFunnormColon")
+
+dev.off()
+
+png("MDSsex.png")
+mdsPlot(getM(GRset.funnorm), 
+        numPositions = 1000, 
+         sampGroups = pData(GRset.funnorm)$Gender,
+        # sampNames = pData(GRset.funnorm)$NDP,
+        legendPos = "bottomleft",
+        main = "preprocessFunnorm")
+dev.off()
+
+save(rgsetPbmc, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/data/technicallyCorrectData/rgsetPbmc.rda")
+
+save(rgsetCol, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/data/technicallyCorrectData/rgsetCol.rda")
+```
+# BMIQ normalization in WaterMelon package
+```{r}
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/data/technicallyCorrectData/mset_raw.rda")
+library(wateRmelon)
+pbmc.bmiq <- BMIQ(getBeta(rgsetPbmc))
+col.bmiq <- BMIQ(getBeta(rgsetCol))
+
+
+```
+
+
+# filtering the probes: SNP, CR probes, XY probes
+
+```{r}
+## SNPs
+snps <- getSnpInfo(gset)
+gset <- addSnpInfo(gset); dim(gset)
+# [1] 485512    288
+gset <- dropLociWithSnps(gset, snps=c("SBE","CpG"), maf=0); dim(gset) ## filter SNP probes
+# 467971    288 #### SNP probes = 17541
+
+## Cross reactive probes
+remProbes <- function(x,y){
+  z <- x[!row.names(x) %in% row.names(y),]
+  return (z)}
+CR <- read.csv("Copy of 48639-non-specific-probes-Illumina450k.csv", row.names = 1)
+gset <- remProbes(gset,subset(CR, CR$X50 == 1)); dim(gset)
+# [1] 467457    288 #### 514 cross reactive probes
+
+## XY probes
+# anno <- data.frame(getAnnotation(gset, what = "everything", lociNames = NULL, orderByLocation = FALSE, dropNonMapping = FALSE))
+anno <- data.frame(granges(gset))
+gset <- remProbes(gset, subset(anno, anno$chr == "chrX" | anno$chr == "chrY")); dim(gset)
+# [1] 456009    288  #### xy probes 11448 
+
+pbmc.gset.quantile.fil <- pbmc.gset.quantile[ row.names(pbmc.gset.quantile)%in%row.names(gset),]
+colnames(pbmc.gset.quantile.fil) <- pData(pbmc.gset.quantile.fil)$External.Sample.ID
+col.gset.quantile.fil <- col.gset.quantile[ row.names(col.gset.quantile)%in%row.names(gset),]
+colnames(col.gset.quantile.fil) <- pData(col.gset.quantile.fil)$External.Sample.ID
+
+## Detection P value
+
+sampleNames(rgset) <- pData(rgset)$External.Sample.ID
+pCutoff <- 0.0000000000000001 # 10-16
+pvals <- detectionP(rgset)
+pvals.pbmc <- pvals[,grep("_P", colnames(pvals))]
+badPr <- as.data.frame(pvals.pbmc >= 0.0000000000000001)
+badPr$sum1 <- rowSums(badPr=="TRUE")
+badPr.pbmc <- subset(badPr, badPr$sum1 >0)
+dim(badPr.pbmc ) 
+# [1] 38520   148
+
+pbmc.gset.quantile.fil <- pbmc.gset.quantile.fil[!rownames(pbmc.gset.quantile.fil)%in% row.names(badPr.pbmc),]
+# [1] 423260    147
+
+pvals.col <- pvals[,grep("_B", colnames(pvals))]
+badPr <- as.data.frame(pvals.col >= 0.0000000000000001)
+badPr$sum1 <- rowSums(badPr=="TRUE")
+badPr.col <- subset(badPr, badPr$sum1 >0)
+dim(badPr.col)
+# [1] 19458   142
+col.gset.quantile.fil <- col.gset.quantile.fil[!rownames(col.gset.quantile.fil)%in% row.names(badPr.col),]
+# [1] 440947    141 
+
+save(pbmc.gset.quantile.fil, col.gset.quantile.fil, gset, anno, file ="methylationLevel3quantile.Rda")
+
+
+## Filtering 
+GRset.funnorm.pbmc.fil <- GRset.funnorm.pbmc[ row.names(GRset.funnorm.pbmc)%in%row.names(gset),]
+colnames(GRset.funnorm.pbmc.fil) <- pData(GRset.funnorm.pbmc.fil)$External.Sample.ID
+GRset.funnorm.col.fil <- GRset.funnorm.col[ row.names(GRset.funnorm.col)%in%row.names(gset),]
+colnames(GRset.funnorm.col.fil) <- pData(GRset.funnorm.col.fil)$External.Sample.ID
+# save(pbmc.gset.funnorm.fil, col.gset.funnorm.fil, gset, anno, file ="methylationLevel3funNorm.Rda")
+## Detection P value
+
+sampleNames(rgset) <- pData(rgset)$External.Sample.ID
+pCutoff <- 0.01
+pvals <- detectionP(rgset)
+pvals.pbmc <- pvals[,grep("_P", colnames(pvals))]
+badPr <- as.data.frame(pvals.pbmc >= 0.01)
+badPr$sum1 <- rowSums(badPr=="TRUE")
+badPr.pbmc <- subset(badPr, badPr$sum1 >0)
+GRset.funnorm.pbmc.fil <- GRset.funnorm.pbmc.fil[!rownames(GRset.funnorm.pbmc.fil)%in% row.names(badPr.pbmc),]
+# [1] 446702    147 #### pbmc detection probes = 9307
+
+pvals.col <- pvals[,grep("_B", colnames(pvals))]
+badPr <- as.data.frame(pvals.col >= 0.01)
+badPr$sum1 <- rowSums(badPr=="TRUE")
+badPr.col <- subset(badPr, badPr$sum1 >0)
+GRset.funnorm.col.fil <-GRset.funnorm.col.fil[!rownames(GRset.funnorm.col.fil)%in% row.names(badPr.col),]
+# [1] 452062    141 #### colon detection probes = 3947
+
+# PBMCs: 38810 total probes removed
+# colon: 33450 total probes removed
+
+save(GRset.funnorm.col.fil, GRset.funnorm.pbmc.fil, file ="methylationLevel3funNorm.Rda")
+
+```
+
+# DMP  M values quantile & functional norm
+```{r}
+load("methylationLevel3quantile.Rda")
+load("methylationLevel3funNorm.Rda")
+
+col.gset.quantile.fil <- col.gset.quantile.fil[ ,!colnames(col.gset.quantile.fil)%in% RPT.col]
+
+pbmc.gset.quantile.fil <- pbmc.gset.quantile.fil[, !colnames(pbmc.gset.quantile.fil)%in% RPT.pbmc ]
+
+library(FDb.InfiniumMethylation.hg19)
+hm450.hg19 <- get450k(genome='hg19')
+ng <- getNearestGene(hm450.hg19)
+anno1 <- anno[row.names(anno)%in%row.names(ng),]
+anno1 <- anno1[row.names(ng),]
+hm450annotations <- cbind(anno1, ng)
+save(hm450annotations, file = "hm450annotations.rda")
+dmps <- function(x,y) {
+  z <- getM(x)
+  dmp <- dmpFinder (z, pheno = y, type = "categorical")
+  a <-  hm450annotations[row.names(hm450annotations)%in%row.names(dmp),]
+  a <- a[row.names(dmp),]
+  dmp1 <- cbind(dmp, a[,c(1,2,3,19,22,23,24,25,26,37)])
+  dmp1 <- as.data.frame(dmp1)
+  b <- getBeta(x)
+  d <- b[row.names(b)%in%row.names(dmp1),]
+  d <- d[row.names(dmp1),]
+  pheno1 <- data.frame(pData(x))
+  row.names(pheno1) <- pheno1[,1] 
+  md <- rowMeans(d[,colnames(d)%in%row.names(subset(pheno1, y ==  levels(as.factor(y))[2]))]) - rowMeans(d[,colnames(d)%in%row.names(subset(pheno1, y ==  levels(as.factor(y))[1]))])
+  dmp1$meanDiff <- md
+  return(dmp1)
+}
+
+
+
+
+tableDMPs <- function(x){
+   tab1 <- matrix(NA, nrow= 3, ncol = 12) 
+   for ( i in 1:length(names(x))) {
+  tab1[1,i] <- dim(subset(x[[i]], x[[i]]$pval <0.05))[1]
+  tab1[2,i] <- dim(subset(x[[i]], x[[i]]$pval <0.001))[1]
+  tab1[3,i] <- dim(subset(x[[i]], x[[i]]$pval <0.00001))[1]
+  colnames(tab1) <- names(x)
+  row.names (tab1) <- c("pval_05", "pval_10^_3", "pval_10^_5")
+     }
+   return(tab1)
+}
+
+dmp.pbmc.qan.dx <- dmps(pbmc.gset.quantile.fil, pData(pbmc.gset.quantile.fil)$Dx)
+dmp.col.qan.dx <- dmps(col.gset.quantile.fil, pData(col.gset.quantile.fil)$Dx)
+# dmp.pbmc.qan.bh <- dmps(pbmc.gset.quantile.fil, pData(pbmc.gset.quantile.fil)$BH)
+# dmp.col.qan.bh <- dmps(col.gset.quantile.fil, pData(col.gset.quantile.fil)$BH)
+dmp.pbmc.qan.sex <- dmps(pbmc.gset.quantile.fil, pData(pbmc.gset.quantile.fil)$Gender)
+dmp.col.qan.sex <- dmps(col.gset.quantile.fil, pData(col.gset.quantile.fil)$Gender)
+
+dmpList <- list(dmp.pbmc.fun.dx,dmp.col.fun.dx,dmp.pbmc.fun.bh,dmp.col.fun.bh,dmp.pbmc.fun.sex,dmp.col.fun.sex,dmp.pbmc.qan.dx,dmp.col.qan.dx,dmp.pbmc.qan.bh,dmp.col.qan.bh, dmp.pbmc.qan.sex,dmp.col.qan.sex)
+names(dmpList) <- c("dmp.pbmc.fun.dx","dmp.col.fun.dx","dmp.pbmc.fun.bh","dmp.col.fun.bh","dmp.pbmc.fun.sex","dmp.col.fun.sex","dmp.pbmc.qan.dx","dmp.col.qan.dx","dmp.pbmc.qan.bh","dmp.col.qan.bh", "dmp.pbmc.qan.sex","dmp.col.qan.sex")
+dmpTableNormPheno <- tableDMPs(dmpList)
+
+save("dmp.pbmc.fun.dx","dmp.col.fun.dx","dmp.pbmc.fun.bh","dmp.col.fun.bh","dmp.pbmc.fun.sex","dmp.col.fun.sex","dmp.pbmc.qan.dx","dmp.col.qan.dx","dmp.pbmc.qan.bh","dmp.col.qan.bh", "dmp.pbmc.qan.sex","dmp.col.qan.sex", "dmpTableNormPheno", "anno1", file = "DMPsAllComb.Rda")
+   write.csv(dmpTableNormPheno, file = "dmpTableNormPheno.csv")
+  write.csv(dmp.col.qan.dx,"dmp.col.qan.dx.csv")
+  write.csv(dmp.pbmc.qan.dx,"dmp.pbmc.qan.dx.csv")
+write.csv(dmp.col.fun.dx,"dmp.col.fun.dx.csv")
+  write.csv(dmp.pbmc.fun.dx,"dmp.pbmc.fun.dx.csv")
+  
+
+########################################################## quantile normalization
+# Bowel habit pairwise comprison
+# IBS-C vs HC
+  load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/data/technicallyCorrectData/methylationLevel3quantile.Rda")
+  
+  pdat<- pData(pbmc.gset.quantile.fil)
+    pbmc.gset.quantile.fil.hcIBSC <- pbmc.gset.quantile.fil[,row.names(pdat[which(c(pdat$BH=="C"|pdat$BH=="N")),])]
+   pbmc.gset.quantile.fil.hcIBSD <- pbmc.gset.quantile.fil[,row.names(pdat[which(c(pdat$BH=="D"|pdat$BH=="N")),])]
+    pbmc.gset.quantile.fil.IBSC.D <- pbmc.gset.quantile.fil[,row.names(pdat[which(c(pdat$BH=="C"|pdat$BH=="D")),])]
+    pbmc.gset.quantile.fil.IBSM.N <- pbmc.gset.quantile.fil[,row.names(pdat[which(c(pdat$BH=="M"|pdat$BH=="N")),])]
+     pbmc.gset.quantile.fil.IBSM.C <- pbmc.gset.quantile.fil[,row.names(pdat[which(c(pdat$BH=="M"|pdat$BH=="C")),])] 
+     pbmc.gset.quantile.fil.IBSM.D <- pbmc.gset.quantile.fil[,row.names(pdat[which(c(pdat$BH=="M"|pdat$BH=="D")),])]
+     
+dmp.pbmc.qan.hcC <- dmps(pbmc.gset.quantile.fil.hcIBSC, pData(pbmc.gset.quantile.fil.hcIBSC)$BH)
+dmp.pbmc.qan.hcD <- dmps(pbmc.gset.quantile.fil.hcIBSD, pData(pbmc.gset.quantile.fil.hcIBSD)$BH)
+dmp.pbmc.qan.CD <- dmps(pbmc.gset.quantile.fil.IBSC.D, pData(pbmc.gset.quantile.fil.IBSC.D)$BH)
+  
+dmp.pbmc.qan.MC <- dmps(pbmc.gset.quantile.fil.IBSM.C, pData(pbmc.gset.quantile.fil.IBSM.C)$BH)
+dmp.pbmc.qan.MD <- dmps(pbmc.gset.quantile.fil.IBSM.D, pData(pbmc.gset.quantile.fil.IBSM.D)$BH)
+dmp.pbmc.qan.NM <- dmps(pbmc.gset.quantile.fil.IBSM.N, pData(pbmc.gset.quantile.fil.IBSM.N)$BH)
+
+
+BHSig <- as.data.frame(rbind(subset(dmp.pbmc.qan.hcC, dmp.pbmc.qan.hcC$pval<0.00001), subset(dmp.pbmc.qan.hcD, dmp.pbmc.qan.hcD$pval<0.00001), subset(dmp.pbmc.qan.NM, dmp.pbmc.qan.NM$pval<0.00001), subset(dmp.pbmc.qan.CD, dmp.pbmc.qan.CD$pval<0.00001), subset(dmp.pbmc.qan.MC, dmp.pbmc.qan.MC$pval<0.00001),subset(dmp.pbmc.qan.MD, dmp.pbmc.qan.MD$pval<0.00001)))
+write.csv(BHSig, file = "BHSig.csv")
+
+# adjp <- p.adjust(rbind(dmp.pbmc.qan.hcC$pval,dmp.pbmc.qan.hcD$pval,dmp.pbmc.qan.NM$pval,dmp.pbmc.qan.CD$pval,dmp.pbmc.qan.MC$pval, dmp.pbmc.qan.MD$pval))
+  dmp.pbmc.qan.dx <- read.csv("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/results_6202017/dmp.pbmc.qan.dx.csv")
+pbmc.sig <- subset(dmp.pbmc.qan.dx, dmp.pbmc.qan.dx$pval<0.05); dim(pbmc.sig) # 16596    16
+
+dmp.col.qan.dx <- read.csv("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/results_6202017/dmp.col.qan.dx.csv")
+col.sig <- subset(dmp.col.qan.dx, dmp.col.qan.dx$pval<0.05); dim(col.sig) #16929    16
+row.names(pbmc.sig) <- pbmc.sig[,1] 
+row.names(col.sig) <- col.sig[,1] 
+
+pbmcBetaSigDx <- getBeta(pbmc.gset.quantile.fil)[row.names(getBeta(pbmc.gset.quantile.fil))%in%row.names(pbmc.sig),]
+colBetaSigDx <- getBeta(col.gset.quantile.fil)[row.names(getBeta(col.gset.quantile.fil))%in%row.names(col.sig),]
+
+pbmcBetaSigDx <- pbmcBetaSigDx[row.names(pbmc.sig),]                          
+colBetaSigDx <- colBetaSigDx[row.names(col.sig),]
+
+save(pbmcBetaSigDx, colBetaSigDx, col.sig, pbmc.sig,file =  "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/sigBetasDx.Rda")
+```
+# IBS HC differences within men and women separately
+```{r}
+# mval.col.f <- getM(col.gset.quantile.fil[,pData(col.gset.quantile.fil)$Gender == "F"]); dim(mval.col.f) # 440947   87
+# mval.col.m <- getM(col.gset.quantile.fil[,pData(col.gset.quantile.fil)$Gender == "M"]); dim(mval.col.m) # 440947   51
+# 
+# mval.pbmc.f <- getM(pbmc.gset.quantile.fil[,pData(pbmc.gset.quantile.fil)$Gender == "F"]); dim(mval.pbmc.f) # 423260   91
+# mval.pbmc.m <- getM(pbmc.gset.quantile.fil[,pData(pbmc.gset.quantile.fil)$Gender == "M"]); dim(mval.pbmc.m) # 423260   54
+
+pbmc.gset.quantile.fil.f <- pbmc.gset.quantile.fil[, pData(pbmc.gset.quantile.fil)$Gender=="F"]; dim(pbmc.gset.quantile.fil.f) # 423260   93
+pbmc.gset.quantile.fil.m <- pbmc.gset.quantile.fil[, pData(pbmc.gset.quantile.fil)$Gender=="M"]; dim(pbmc.gset.quantile.fil.m) # 423260   54
+
+col.gset.quantile.fil.f <- col.gset.quantile.fil[, pData(col.gset.quantile.fil)$Gender=="F"]; dim(col.gset.quantile.fil.f) #440947   89
+col.gset.quantile.fil.m <-col.gset.quantile.fil[, pData(col.gset.quantile.fil)$Gender=="M"]
+dim(col.gset.quantile.fil.m) #440947   52
+
+dmp.pbmc.f.dx <- dmps(pbmc.gset.quantile.fil.f, pData(pbmc.gset.quantile.fil.f)$Dx)
+dmp.pbmc.m.dx <- dmps(pbmc.gset.quantile.fil.m, pData(pbmc.gset.quantile.fil.m)$Dx)
+
+dmp.col.f.dx <- dmps(col.gset.quantile.fil.f, pData(col.gset.quantile.fil.f)$Dx)
+dmp.col.m.dx <- dmps(col.gset.quantile.fil.m, pData(col.gset.quantile.fil.m)$Dx)
+
+dmp.pbmc.f.dx.sig <- subset(dmp.pbmc.f.dx, dmp.pbmc.f.dx$pval<0.00001) #10^-7
+dmp.pbmc.m.dx.sig <- subset(dmp.pbmc.m.dx, dmp.pbmc.m.dx$pval<0.00001) #10^-7
+dmp.col.f.dx.sig <- subset(dmp.col.f.dx, dmp.col.f.dx$pval<0.00001) #10^-7
+dmp.col.m.dx.sig <- subset(dmp.col.m.dx, dmp.col.m.dx$pval<0.00001) #10^-7
+
+write.csv(dmp.pbmc.f.dx.sig, file="dmp.pbmc.f.dx.sig.csv")
+write.csv(dmp.pbmc.m.dx.sig, file="dmp.pbmc.m.dx.sig.csv")
+write.csv(dmp.col.f.dx.sig, file="dmp.col.f.dx.sig.csv")
+write.csv(dmp.col.m.dx.sig, file="dmp.col.m.dx.sig.csv")
+
+dmpList <- list(dmp.pbmc.f.dx,dmp.pbmc.m.dx,dmp.col.f.dx,dmp.col.m.dx) 
+names(dmpList) <- c("dmp.pbmc.f.dx","dmp.pbmc.m.dx","dmp.col.f.dx","dmp.col.m.dx") 
+
+dmpTableDxSexInt <- tableDMPs(dmpList)
+
+save(dmp.pbmc.f.dx, dmp.pbmc.m.dx, dmp.col.f.dx, dmp.col.m.dx, file = "DMPsDxSexInter.Rda")
+   write.csv(dmpTableNormPheno, file = "dmpTableNormPheno.csv")
+   
+   
+   pData(pbmc.gset.quantile.fil)$IBSSexInt <- interaction(pData(pbmc.gset.quantile.fil)$Dx, pData(pbmc.gset.quantile.fil)$Gender)
+   
+   
+   
+   png("Sig4femaleDxPBMC.png", height = 1000, width = 800)
+       par  (mfrow=c(2, 2) ) 
+       sapply(rownames(dmp.pbmc.f.dx.sig)[1:4], function(cpg)
+         {plotCpg(getBeta(pbmc.gset.quantile.fil), cpg= cpg,  
+                  pheno =  pData(pbmc.gset.quantile.fil)$IBSSexInt, ylab ="Beta values")
+       })
+dev.off()
+
+
+  pData(col.gset.quantile.fil)$IBSSexInt <- interaction(pData(col.gset.quantile.fil)$Dx, pData(col.gset.quantile.fil)$Gender)
+   
+   
+   
+   png("Sig4femaleDxCol.png", height = 1000, width = 800)
+       par  (mfrow=c(2, 2) ) 
+       sapply(rownames(dmp.col.f.dx.sig)[1:4], function(cpg)
+         {plotCpg(getBeta(col.gset.quantile.fil), cpg= cpg,  
+                  pheno =  pData(col.gset.quantile.fil)$IBSSexInt, ylab ="Beta values")
+       })
+dev.off()
+
+
+
+
+
+###########################################################
+dmp.pbmc.qan.IBSSexInt <- dmps(pbmc.gset.quantile.fil, pData(pbmc.gset.quantile.fil)$IBSSexInt)
+
+dmp.col.qan.IBSSexInt <- dmps(col.gset.quantile.fil, pData(col.gset.quantile.fil)$IBSSexInt)
+
+png("Sig4InteractionPBMC.png", height = 1000, width = 800)
+  par  (mfrow=c(2, 2) ) 
+       sapply(rownames(dmp.pbmc.qan.IBSSexInt)[1:4], function(cpg)
+         {plotCpg(getBeta(pbmc.gset.quantile.fil), cpg= cpg,  
+                  pheno=  pData(pbmc.gset.quantile.fil)$IBSSexInt, ylab ="Beta values")
+       })
+       dev.off()
+       
+```
+# DMRs
+```{r}
+ myAnnotation <-    cpg.annotate(object = mVals,  datatype = "array" , what =  "M",       
+                        analysis.type= "differential", design = design,        
+                        contrasts = TRUE, cont.matrix = contMatrix, coef =  "naive - rTreg", 
+                        arraytype = "450K")
+                    
+ DMRs <-  dmrcate   (myAnnotation,    lambda=    1000, C= 2)
+                        
+```
+
+# BMIQ normalization WaterMelon
+```{r}
+source("https://bioconductor.org/biocLite.R")
+biocLite("wateRmelon")
+```
+
+# minfi blood cells
+```{r}
+pred_age <- agep(pbmcBetas, coeff=NULL, verbose=FALSE)
+age_df <- cbind(as.data.frame(pData(pbmc.gset.quantile.fil))$Age, as.data.frame(pData(pbmc.gset.quantile.fil))$Dx)
+colnames(age_df) <- c("Age","Dx")
+row.names(age_df) <- row.names(pData(pbmc.gset.quantile.fil))
+age_df <- as.data.frame(age_df)
+age_df$Predicted_age <- pred_age
+
+save(age_df, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/age_df.rda")
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/age_df.rda")
+
+age_df$Age <- as.numeric(as.character(age_df$Age))
+age_df$Predicted_age <- as.numeric(as.character(age_df$Predicted_age))
+age_df_ibs <- age_df[age_df$Dx=="IBS",]
+age_df_hc <- age_df[age_df$Dx=="HC",]
+
+library(ggplot2)
+p <- ggplot(age_df, aes(x=Age, y=Predicted_age, color = Dx)) + geom_point() +  geom_smooth(method=lm) #+ geom_text(aes(label=row.names(age_df)),hjust=0, vjust=0)           # Add a loess smoothed fit curve with confidence region
+#> `geom_smooth()` using method = 'loess'
+ggsave(p , file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/all_ageVspredAge.png")
+
+png("cor.age.ibs.png")
+ggplot(age_df_ibs, aes(x=Age, y=Predicted_age)) +  geom_point() + geom_smooth(method=lm)            
+dev.off()
+
+
+png("cor.age.hc.png")
+ggplot(age_df_hc, aes(x=Age, y=Predicted_age)) +
+    geom_point() +    geom_smooth(method=lm)            
+dev.off()
+```
+
+
+
+
+```{r}
+m1 <- lm(Predicted_age ~ Age * Dx, data = age_df); summary(m1)
+m1.null <- lm(Predicted_age ~ Age + Dx, data = age_df)
+anova(m1.null, m1)
+```
+
+
+
+```{r}
+m1 <- lm(Predicted_age ~ Age , data = age_df_ibs)
+m2 <- lm(Predicted_age ~ Age , data = age_df_hc)
+coef(m1)
+coef(m2)
+summary(m1)
+summary(m2)
+```
+
+
+# Age colon tissue
+```{r}
+colBetas <- getBeta(col.gset.quantile.fil)
+pred_age <- agep(colBetas, coeff=NULL, verbose=FALSE)
+age_df <- cbind(as.data.frame(pData(col.gset.quantile.fil))$Age, as.data.frame(pData(col.gset.quantile.fil))$Dx)
+colnames(age_df) <- c("Age","Dx")
+row.names(age_df) <- row.names(pData(col.gset.quantile.fil))
+age_df <- as.data.frame(age_df)
+age_df$Predicted_age <- pred_age
+
+save(age_df, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/age_df_colon.rda")
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/age_df_colon.rda")
+
+age_df$Age <- as.numeric(as.character(age_df$Age))
+age_df$Predicted_age <- as.numeric(as.character(age_df$Predicted_age))
+age_df_ibs <- age_df[age_df$Dx=="IBS",]
+age_df_hc <- age_df[age_df$Dx=="HC",]
+
+library(ggplot2)
+p <- ggplot(age_df, aes(x=Age, y=Predicted_age, color = Dx)) + geom_point() +  geom_smooth(method=lm) #+ geom_text(aes(label=row.names(age_df)),hjust=0, vjust=0)           # Add a loess smoothed fit curve with confidence region
+#> `geom_smooth()` using method = 'loess'
+ggsave(p , file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/all_ageVspredAge.png")
+
+png("cor.age.ibs.png")
+ggplot(age_df_ibs, aes(x=Age, y=Predicted_age)) +  geom_point() + geom_smooth(method=lm)            
+dev.off()
+
+
+png("cor.age.hc.png")
+ggplot(age_df_hc, aes(x=Age, y=Predicted_age)) +
+    geom_point() +    geom_smooth(method=lm)            
+dev.off()
+```
+
+
+
+
+```{r}
+m1 <- lm(Predicted_age ~ Age * Dx, data = age_df); summary(m1)
+m1.null <- lm(Predicted_age ~ Age + Dx, data = age_df)
+anova(m1.null, m1)
+```
+
+
+
+```{r}
+m1 <- lm(Predicted_age ~ Age , data = age_df_ibs)
+m2 <- lm(Predicted_age ~ Age , data = age_df_hc)
+coef(m1)
+coef(m2)
+summary(m1)
+summary(m2)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#QC plots
+```{r}
+MSet <- preprocessRaw(rgset)
+qc <- getQC(MSet)
+plotQC(qc)
+
+png("qc1.png")
+plotQC(qc)
+dev.off()
+
+png("qc.densityPlot.png")
+densityPlot(MSet, sampGroups = pData(rgset_proc)$Dx)
+dev.off()
+
+png("qc.beanPlot.png")
+densityBeanPlot(MSet, sampGroups = pData(rgset_proc)$Dx)
+dev.off()
+
+library(shinyMethyl)
+summaryP <- shinySummarize(rgset)
+runShinyMethyl(summaryP)
+```
+
+```{r}
+library(FlowSorted.Blood.450k)
+cellCounts <- estimateCellCounts(RGset.pbmc)
+```
+

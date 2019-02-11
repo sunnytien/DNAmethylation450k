@@ -1,0 +1,1730 @@
+---
+title: "MethBioconductorWorkFlow"
+author: "Swapna Mahurkar-Joshi"
+date: "July 28, 2017"
+output: html_document
+---
+```{r, echo=FALSE, message=FALSE}
+#https://www.bioconductor.org/help/workflows/methylationArrayAnalysis/#differential-methylation-analysis
+# source("http://bioconductor.org/workflows.R")
+# workflowInstall("methylationArrayAnalysis")
+# source("http://bioconductor.org/workflows.R")
+# biocLite("DSS")
+library(scater)
+library(limma)
+library(minfi)
+library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+library(IlluminaHumanMethylation450kmanifest)
+library(RColorBrewer)
+library(missMethyl)
+library(matrixStats)
+# library(minfiData)
+library(Gviz)
+library(DMRcate)
+library(stringr)
+library(ggplot2)
+library(methylationArrayAnalysis)
+library(FDb.InfiniumMethylation.hg19)
+library(RColorBrewer)
+# source(file  = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/src/MethylationFunctions.Rmd")
+```
+```{r}
+
+```
+
+```{r setup}
+# Set working directory outside the chunks
+knitr::opts_knit$set(root.dir = normalizePath("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/"))
+```
+
+```{r}
+# set working directory
+# "C:\Users\swapnajoshi-admin\Documents\GIT_workspace\IBSdnaMethylationProject\DNA_methylation_R21_Analysis\temp\functional_norm\methBioconductorWorkflow"
+```
+
+# Load Data
+```{r}
+load("/data/technicallyCorrectData/rgset.rda")
+```
+
+# QC
+```{r}
+sampleNames(rgset) <- pData(rgset)$External.Sample.ID
+pvals <- detectionP(rgset)
+pvals.pbmc <- pvals[,grep("_P", colnames(pvals))]
+targets<- pData(rgset)
+# examine mean detection p-values across all samples to identify any failed samples
+pal <- brewer.pal(3,"Dark2")
+par(mfrow=c(1,2))
+barplot(colMeans(pvals.pbmc), col=pal[factor(targets$Dx)], las=2, cex.names=0.8, ylab="Mean detection p-values")
+abline(h=0.05,col="red")
+legend("topleft", legend=levels(factor(targets$Dx)), fill=pal,
+       bg="white")
+
+barplot(colMeans(pvals.pbmc), col=pal[factor(targets$Dx)], las=2, cex.names=0.8, ylim=c(0,0.002), ylab="Mean detection p-values")
+abline(h=0.05,col="red")
+legend("topleft", legend=levels(factor(targets$Dx)), fill=pal,        bg="white")
+
+qcReport(rgset, sampNames=targets$External.Sample.ID, sampGroups=targets$Dx, pdf="/temp/functional_norm/methBioconductorWorkflow/qcReport.pdf")
+```
+
+```{r}
+# perform functional normalization as done in V1_functional_norm_7112017
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/data/technicallyCorrectData/methylationLevel3funNorm.Rda")
+
+# visualise what the data looks like before and after normalisation
+rgset.c <- rgset[,grep("_B", colnames(rgset))]
+rgset.p <- rgset[,grep("_P", colnames(rgset))]
+png("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/Raw_funNormalized_plots.png", height = 2000, width = 2000, res  =200)
+par(mfrow=c(2,2))
+densityPlot(rgset.p, sampGroups=pData(rgset.p)$Dx,main="Raw PBMC", legend=FALSE)
+legend("top", legend = levels(factor(pData(rgset.p)$Dx)), 
+       text.col=brewer.pal(8,"Dark2"))
+densityPlot(getBeta(GRset.funnorm.pbmc.fil), sampGroups=pData(rgset.p)$Dx,
+            main="Normalized PBMC", legend=FALSE)
+legend("top", legend = levels(factor(pData(rgset.p)$Dx)), 
+       text.col=brewer.pal(8,"Dark2"))
+
+densityPlot(rgset.c, sampGroups=pData(rgset.c)$Dx,main="Raw_Colon", legend=FALSE)
+legend("top", legend = levels(factor(pData(rgset.c)$Dx)), 
+       text.col=brewer.pal(8,"Dark2"))
+densityPlot(getBeta(GRset.funnorm.col.fil), sampGroups=pData(rgset.c)$Dx,
+            main="Normalized_Colon", legend=FALSE)
+legend("top", legend = levels(factor(pData(rgset.c)$Dx)), 
+       text.col=brewer.pal(8,"Dark2"))
+dev.off()
+```
+
+```{r}
+# MDS plots to look at largest sources of variation
+png("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/MDS_funNormalized_plots.png", height = 2000, width = 2000, res  =200)
+par(mfrow=c(2,2))
+plotMDS(getM(GRset.funnorm.pbmc.fil), top=1000, gene.selection="common", 
+        col=pal[factor(pData(GRset.funnorm.pbmc.fil)$Dx)])
+legend("bottomright", legend=levels(factor(pData(GRset.funnorm.pbmc.fil)$Dx)), text.col=pal,  bg="white", cex=0.7)
+
+plotMDS(getM(GRset.funnorm.pbmc.fil), top=1000, gene.selection="common",  
+        col=pal[factor(pData(GRset.funnorm.pbmc.fil)$Gender)])
+legend("bottomright", legend=levels(factor(pData(GRset.funnorm.pbmc.fil)$Gender)), text.col=pal,       bg="white", cex=0.7)
+
+plotMDS(getM(GRset.funnorm.col.fil), top=1000, gene.selection="common", 
+        col=pal[factor(pData(GRset.funnorm.col.fil)$Dx)])
+legend("bottomright", legend=levels(factor(pData(GRset.funnorm.col.fil)$Dx)), text.col=pal,       bg="white", cex=0.7)
+
+plotMDS(getM(GRset.funnorm.col.fil), top=1000, gene.selection="common",  
+        col=pal[factor(pData(GRset.funnorm.col.fil)$Gender)])
+legend("bottomright", legend=levels(factor(pData(GRset.funnorm.col.fil)$Gender)), text.col=pal,      bg="white", cex=0.7)
+dev.off()
+```
+
+```{r}
+# Examine higher dimensions to look at other sources of variation
+png("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/MDS_funNormalized_plots_pc3_4.png", height = 2000, width = 2000, res  =200)
+
+par(mfrow=c(2,3))
+plotMDS(getM(GRset.funnorm.pbmc.fil), top=1000, gene.selection="common", 
+        col=pal[factor(pData(GRset.funnorm.pbmc.fil)$Dx)], dim = c(1,3))
+legend("bottomright", legend=levels(factor(pData(GRset.funnorm.pbmc.fil)$Dx)), text.col=pal,  bg="white", cex=0.7)
+
+plotMDS(getM(GRset.funnorm.pbmc.fil), top=1000, gene.selection="common", 
+        col=pal[factor(pData(GRset.funnorm.pbmc.fil)$Dx)], dim = c(2,3))
+legend("bottomright", legend=levels(factor(pData(GRset.funnorm.pbmc.fil)$Dx)), text.col=pal,  bg="white", cex=0.7)
+
+plotMDS(getM(GRset.funnorm.pbmc.fil), top=1000, gene.selection="common", 
+        col=pal[factor(pData(GRset.funnorm.pbmc.fil)$Dx)], dim = c(3,4))
+legend("bottomright", legend=levels(factor(pData(GRset.funnorm.pbmc.fil)$Dx)), text.col=pal,  bg="white", cex=0.7)
+
+plotMDS(getM(GRset.funnorm.col.fil), top=1000, gene.selection="common", 
+        col=pal[factor(pData(GRset.funnorm.col.fil)$Dx)], dim = c(1,3))
+legend("bottomright", legend=levels(factor(pData(GRset.funnorm.col.fil)$Dx)), text.col=pal,       bg="white", cex=0.7)
+
+plotMDS(getM(GRset.funnorm.col.fil), top=1000, gene.selection="common", 
+        col=pal[factor(pData(GRset.funnorm.col.fil)$Dx)], dim = c(2,3))
+legend("bottomright", legend=levels(factor(pData(GRset.funnorm.col.fil)$Dx)), text.col=pal,       bg="white", cex=0.7)
+
+plotMDS(getM(GRset.funnorm.col.fil), top=1000, gene.selection="common", 
+        col=pal[factor(pData(GRset.funnorm.col.fil)$Dx)], dim = c(3,4))
+legend("bottomright", legend=levels(factor(pData(GRset.funnorm.col.fil)$Dx)), text.col=pal,       bg="white", cex=0.7)
+
+
+dev.off()
+```
+
+# Filtering
+
+```{r}
+# ensure probes are in the same order in the mSetSq and detP objects
+detP <- pvals[match(featureNames(gset),rownames(pvals)),] 
+
+# remove any probes that have failed in one or more samples
+keep <- rowSums(detP < 0.01) == ncol(gset) 
+table(keep)
+
+keep
+ # FALSE   TRUE 
+ # 13326 472186
+
+gsetFlt <- gset[keep,]
+gsetFlt
+# class: GenomicRatioSet 
+# dim: 472186 288 
+# metadata(0):
+# assays(3): Beta M CN
+# rownames(472186): cg13869341 cg14008030 ... cg26251715 cg25640065
+# rowRanges metadata column names(0):
+# colnames(288): 200556930066_R01C01 200556930066_R02C01 ... 200556930083_R05C02
+#   200556930083_R06C02
+# colData names(13): External.Sample.ID Chip ... X X.1
+# Annotation
+#   array: IlluminaHumanMethylation450k
+#   annotation: ilmn12.hg19
+# Preprocessing
+#   Method: Raw (no normalization or bg correction)
+#   minfi version: 1.16.1
+#   Manifest version: 0.4.0
+```
+
+```{r}
+# remove probes on the sex chromosomes
+
+# load 450k annotations
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/hm450annotations.rda")
+
+keep <- !(featureNames(gsetFlt) %in% hm450annotations$Name[hm450annotations$chr %in% 
+                                                        c("chrX","chrY")])
+table(keep)
+# keep
+#  FALSE   TRUE 
+#  10703 461483 
+
+gsetFlt <- gsetFlt[keep,]
+
+gsetFlt
+# class: GenomicRatioSet 
+# dim: 461483 288 
+# metadata(0):
+# assays(3): Beta M CN
+# rownames(461483): cg13869341 cg14008030 ... cg10645377 cg08873063
+# rowRanges metadata column names(0):
+# colnames(288): 200556930066_R01C01 200556930066_R02C01 ... 200556930083_R05C02
+#   200556930083_R06C02
+# colData names(13): External.Sample.ID Chip ... X X.1
+# Annotation
+#   array: IlluminaHumanMethylation450k
+#   annotation: ilmn12.hg19
+# Preprocessing
+#   Method: Raw (no normalization or bg correction)
+#   minfi version: 1.16.1
+#   Manifest version: 0.4.0
+```
+
+```{r}
+# remove probes with SNPs at CpG site
+gsetFlt <- dropLociWithSnps(gsetFlt)
+gsetFlt
+
+# class: GenomicRatioSet
+# dim: 446315 288
+# metadata(0):
+# assays(3): Beta M CN
+# rownames(446315): cg13869341 cg14008030 ... cg25873532 cg18547980
+# rowRanges metadata column names(0):
+# colnames(288): 200556930066_R01C01 200556930066_R02C01 ... 200556930083_R05C02
+#   200556930083_R06C02
+# colData names(13): External.Sample.ID Chip ... X X.1
+# Annotation
+#   array: IlluminaHumanMethylation450k
+#   annotation: ilmn12.hg19
+# Preprocessing
+#   Method: Raw (no normalization or bg correction)
+#   minfi version: 1.16.1
+#   Manifest version: 0.4.0
+```
+
+```{r}
+# exclude cross reactive probes: This list was originally published by Chen et al. (2013) and can be obtained from the authors website. excel sheet was saved as csv
+
+xReactiveProbes <- read.csv("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/48639-non-specific-probes-Illumina450k.csv",                                 sep=",", stringsAsFactors=FALSE)
+keep <- !(featureNames(gsetFlt) %in% xReactiveProbes$TargetID)
+table(keep)
+
+## keep
+# FALSE   TRUE 
+#  26058 420257 
+
+gsetFlt <- gsetFlt[keep,] 
+gsetFlt
+
+# class: GenomicRatioSet 
+# dim: 420257 288 
+# metadata(0):
+# assays(3): Beta M CN
+# rownames(420257): cg13869341 cg24669183 ... cg19565306 cg09226288
+# rowRanges metadata column names(0):
+# colnames(288): 200556930066_R01C01 200556930066_R02C01 ... 200556930083_R05C02
+#   200556930083_R06C02
+# colData names(13): External.Sample.ID Chip ... X X.1
+# Annotation
+#   array: IlluminaHumanMethylation450k
+#   annotation: ilmn12.hg19
+# Preprocessing
+#   Method: Raw (no normalization or bg correction)
+#   minfi version: 1.16.1
+#   Manifest version: 0.4.0
+  
+save(gsetFlt, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/gsetFlt.rda")
+
+
+load( "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/data/technicallyCorrectData/GRset.funnorm.col.pbmc.Rda")
+
+GRsetColFunFlt <- GRset.funnorm.col[featureNames(GRset.funnorm.col)%in%featureNames(gsetFlt),]
+GRsetColFunFlt
+# class: GenomicRatioSet 
+# dim: 420257 141 
+# metadata(0):
+# assays(2): Beta CN
+# rownames(420257): cg13869341 cg24669183 ... cg19565306 cg09226288
+# rowRanges metadata column names(0):
+# colnames(141): 200556930007_R01C01 200556930007_R02C01 ... 200556930083_R03C02
+#   200556930083_R06C02
+# colData names(14): External.Sample.ID Chip ... X.1 predictedSex
+# Annotation
+#   array: IlluminaHumanMethylation450k
+#   annotation: ilmn12.hg19
+# Preprocessing
+#   Method: NA
+#   minfi version: NA
+#   Manifest version: NA
+GRsetPbmcFunFlt <- GRset.funnorm.pbmc[featureNames(GRset.funnorm.pbmc)%in%featureNames(gsetFlt),]
+GRsetPbmcFunFlt
+# class: GenomicRatioSet 
+# dim: 420257 147 
+# metadata(0):
+# assays(2): Beta CN
+# rownames(420257): cg13869341 cg24669183 ... cg19565306 cg09226288
+# rowRanges metadata column names(0):
+# colnames(147): 200556930066_R01C01 200556930066_R02C01 ... 200556930083_R04C02
+#   200556930083_R05C02
+# colData names(14): External.Sample.ID Chip ... X.1 predictedSex
+# Annotation
+#   array: IlluminaHumanMethylation450k
+#   annotation: ilmn12.hg19
+# Preprocessing
+#   Method: NA
+#   minfi version: NA
+#   Manifest version: NA
+```
+
+```{r}
+# remove repeat samples 
+
+RPT.col <- colnames(GRsetColFunFlt[,grep("RPT", colnames(GRsetColFunFlt))]) 
+# [1] "A6172_B_RPT" "A5556_B_RPT" "A6552_B_RPT"
+GRsetColFunFlt <- GRsetColFunFlt[ ,!colnames(GRsetColFunFlt)%in% RPT.col]
+
+RPT.pbmc <- colnames(GRsetPbmcFunFlt[,grep("RPT", colnames(GRsetPbmcFunFlt))]) 
+# [1]  "A6207_P_RPT" "A6530_P_RPT"
+GRsetPbmcFunFlt <- GRsetPbmcFunFlt[, !colnames(GRsetPbmcFunFlt)%in% RPT.pbmc]
+colnames(GRsetPbmcFunFlt) <- pData(GRsetPbmcFunFlt)$External.Sample.ID 
+colnames(GRsetColFunFlt) <- pData(GRsetColFunFlt)$External.Sample.ID 
+save(GRsetPbmcFunFlt, GRsetColFunFlt, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/GRsetPbmcColFunFlt.Rda")
+
+load("DNA_methylation_R21_Analysis/data/technicallyCorrectData/anno.rda")
+hm450.hg19 <- get450k(genome='hg19')
+ng <- getNearestGene(hm450.hg19)
+anno1 <- anno[row.names(anno)%in%row.names(ng),]
+anno1 <- anno1[row.names(ng),]
+hm450annotations <- cbind(anno1, ng)
+save(hm450annotations, file= "temp/hm450annotations.rda")
+```
+
+######################################################################################
+# Dx associated DMPs in PBMCs
+######################################################################################
+
+```{r}
+load("temp/functional_norm/methBioconductorWorkflow/GRsetPbmcColFunFlt.Rda")
+load("temp/hm450annotations.rda")
+ann450kSub <- hm450annotations[match(featureNames(GRsetColFunFlt),hm450annotations$Name),c(1:4,12:19,24:ncol(hm450annotations))] 
+# PbmcDxDMPs <- DMPs(GRsetPbmcFunFlt,factor(pData(GRsetPbmcFunFlt)$Dx), ann450kSub)
+# pbmcDxDMP <- dmpFinder(getM(GRsetPbmcFunFlt),pData(GRsetPbmcFunFlt)$Dx, type = "categorical", qCutoff = 1, shrinkVar = TRUE)
+
+library(minfiData)
+if (require(minfiData)) {
+
+grp <- pData(GRsetPbmcFunFlt)$Dx
+M <- getM(GRsetPbmcFunFlt)
+B <- getBeta(GRsetPbmcFunFlt)
+PbmcDxDMPs <- dmpFinder(M, pheno=grp, type="categorical", shrinkVar = TRUE)
+PbmcDxDMPs$Bdiff <- rowMeans(B[row.names(PbmcDxDMPs),colnames(B)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$Dx == "IBS"))])-rowMeans(B[row.names(PbmcDxDMPs),colnames(B)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$Dx == "HC"))])
+sum(PbmcDxDMPs$qval < 0.05, na.rm=TRUE)
+head(PbmcDxDMPs)
+ann450kSub <- ann450kSub[row.names(ann450kSub)%in%row.names(PbmcDxDMPs),]
+ann450kSub <- ann450kSub[row.names(PbmcDxDMPs),]
+PbmcDxDMPs <- cbind(PbmcDxDMPs,ann450kSub)
+}
+
+
+save(PbmcDxDMPs, file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/pbmc/PbmcDxDMPs.rda")
+write.csv(PbmcDxDMPs, file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/pbmc/PbmcDxDMPs.csv")
+# PbmcDxDMPs <- read.csv("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/pbmc/PbmcDxDMPs.csv", row.names = 1)
+PbmcDxDMPs_sig <- subset(PbmcDxDMPs, PbmcDxDMPs$qval<0.05); dim(PbmcDxDMPs_sig)
+# [1]  0 31
+PbmcDxDMPs_sig_p05 <- subset(PbmcDxDMPs, PbmcDxDMPs$pval<0.05); dim(PbmcDxDMPs_sig_p05)
+# [1] 13617    33
+PbmcDxDMPs_sig_p001 <- subset(PbmcDxDMPs, PbmcDxDMPs$pval<0.001); dim(PbmcDxDMPs_sig_p001)
+# [1] 179  33
+write.csv(PbmcDxDMPs_sig_p001, file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/pbmc/PbmcDxDMPs_sig_p001.csv")
+
+betas_Pbmc <- getBeta(GRsetPbmcFunFlt)
+design <- model.matrix(~0+pData(GRsetPbmcFunFlt)$Dx, data=pData(GRsetPbmcFunFlt))
+  colnames(design) <- levels(factor(pData(GRsetPbmcFunFlt)$Dx))
+  fit <- lmFit(betas_Pbmc, design)
+  contMatrix <- makeContrasts(IBS-HC ,levels=design)
+  fit2 <- contrasts.fit(fit, contMatrix)
+  fit2 <- eBayes(fit2,robust=T, trend=T)
+  tt <- topTable(fit2, coef=1,number=Inf, genelist=ann450kSub)
+  
+  md1 <- rowMeans(betas_Pbmc[,colnames(betas_Pbmc)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$Dx ==  levels(as.factor(pData(GRsetPbmcFunFlt)$Dx))[2]))]) - rowMeans(betas_Pbmc[,colnames
+(betas_Pbmc)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$Dx ==  levels(as.factor(pData(GRsetPbmcFunFlt)$Dx))[1]))])
+  tt$meanDiff <- md1
+library(limma)
+library(missMethyl)
+gst.KEGG <- gometh(sig.cpg=rownames(PbmcDxDMPs), all.cpg=rownames(betas_Pbmc),  prior.prob = T)
+gst.KEGG <- gst.KEGG[order(gst.KEGG$P.DE),]
+gst.KEGG  <- gst.KEGG[gst.KEGG$FDR<0.05,]
+
+# ann <- missMethyl:::.flattenAnn(fit2)
+# m <- match(rownames(fit2), ann$cpg)
+# EntrezID <- ann$entrezid[m]
+# n <- table(EntrezID)
+# k <- kegga(fit2, geneid=EntrezID, covariate=n[EntrezID])
+# topKEGG(k)
+
+
+
+```
+
+```{r setup}
+# Set working directory outside the chunks
+knitr::opts_knit$set(root.dir = normalizePath("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/"))
+```
+
+# DMRs
+```{r}
+
+library(Gviz)
+library(GenomicRanges)
+library(DMRcate)
+
+targets <- pData(GRsetPbmcFunFlt)
+dx <- factor(targets$Dx)
+design <- model.matrix(~0+dx, data=targets)
+colnames(design) <- levels(dx)
+contMatrix <- makeContrasts(IBS-HC,   levels=design)
+contMatrix
+
+myAnnotation <- cpg.annotate(object = getM(GRsetPbmcFunFlt), datatype = "array", what = "M", analysis.type = "differential", design = design, contrasts = TRUE, cont.matrix = contMatrix, coef = "IBS - HC", arraytype = "450K")
+
+str(myAnnotation)
+# List of 7
+#  $ ID    : Factor w/ 420257 levels "cg00000029","cg00000108",..: 222425 374552 248925 18571 277135 194037 362374 266425 100898 55258 ...
+#  $ stat  : num [1:420257] 1.095 -2.231 -0.322 0.212 -0.347 ...
+#  $ CHR   : Factor w/ 22 levels "chr1","chr10",..: 1 1 1 1 1 1 1 1 1 1 ...
+#  $ pos   : int [1:420257] 15865 534242 710097 714177 720865 758829 763119 779995 805102 805338 ...
+#  $ betafc: num [1:420257] 9.02e-03 -1.32e-02 -1.72e-03 4.78e-05 -8.13e-04 ...
+#  $ indfdr: num [1:420257] 1 1 1 1 1 ...
+#  $ is.sig: logi [1:420257] FALSE FALSE FALSE FALSE FALSE FALSE ...
+#  - attr(*, "row.names")= int [1:420257] 1 2 3 4 5 6 7 8 9 10 ...
+#  - attr(*, "class")= chr "annot"
+
+
+DMRs <- dmrcate(myAnnotation, lambda=1000, C=2, pcutoff = 0.001)
+head(DMRs$results); dim(DMRs$results)
+DMRsInt<- DMRs$results[order(-DMRs$results$no.cpgs),]
+# 
+#                       coord no.cpgs       minfdr Stouffer  maxbetafc meanbetafc
+# 12  chr20:57427274-57427942      18 8.791846e-05        1 0.04018264 0.01837412
+# 11  chr20:43935222-43935551       9 2.333466e-05        1 0.04273920 0.02485073
+# 10  chr19:57630446-57630691       8 8.025709e-04        1 0.03009786 0.01785044
+# 1    chr1:24229232-24229682       5 8.548694e-06        1 0.03850575 0.03519281
+# 5       chr16:450562-451040       5 8.791846e-05        1 0.08800632 0.05547127
+# 8   chr17:80393124-80393666       5 1.889939e-06        1 0.02761253 0.01341668
+# 6     chr16:3079708-3079953       4 8.025709e-04        1 0.03098642 0.02761540
+# 2   chr13:58205001-58205111       3 1.404496e-05        1 0.02586554 0.01196997
+# 7   chr17:72270155-72270444       3 2.248281e-04        1 0.04970472 0.02936569
+# 13 chr6:170337747-170337897       3 3.914138e-04        1 0.01947245 0.01364406
+# 4   chr15:75019302-75019376       2 8.025709e-04        1 0.03146319 0.01589445
+# 9   chr18:43418829-43419102       2 6.145642e-04        1 0.04767722 0.04049430
+
+# convert the regions to annotated genomic ranges
+# data(dmrcatedata)
+results.ranges <- extractRanges(DMRs, genome = "hg19")
+save(results.ranges, file = "temp/functional_norm/methBioconductorWorkflow/pbmc/PbmcDMRs_p001.csv")
+# set up the grouping variables and colors
+pal <- brewer.pal(3,"Dark2")
+groups <- pal[1:length(unique(targets$Dx))]
+names(groups) <- levels(factor(targets$Dx))
+cols <- groups[as.character(factor(targets$Dx))]
+samps <- 1:nrow(targets)
+
+# draw the plot for the top DMR
+png("temp/functional_norm/methBioconductorWorkflow/pbmc/PbmcDxDMR1.png", height = 2000, width = 2000, res = 250)
+DMR.plot(ranges=results.ranges, dmr=1, CpGs=getBeta(GRsetPbmcFunFlt), phen.col=cols, what = "Beta",      arraytype = "450K", pch=16, toscale=TRUE, plotmedians=TRUE,   genome="hg19", samps=samps)
+dev.off()
+
+```
+
+```{r}
+## PCDH17 DMR
+pcdh17SigCpgs <- PbmcDxDMPs_sig_p05[PbmcDxDMPs_sig_p05$nearestGeneSymbol=="PCDH17",] # 3rd in in opp direction
+pcdh17SigCpgsPlusStr <- subset(pcdh17SigCpgs, pcdh17SigCpgs$strand == "+")
+pcdh17SigCpgsNegStr <- subset(pcdh17SigCpgs, pcdh17SigCpgs$strand == "-")
+
+pcdh17SigCpgs <- pcdh17SigCpgsPlusStr
+pcdh17SigCpgs <- pcdh17SigCpgs[order(pcdh17SigCpgs$pos),]
+betas_pcdh17dmr <- betas_Pbmc[row.names(betas_Pbmc)%in%row.names(pcdh17SigCpgs),]
+betas_pcdh17dmr <- betas_Pbmc[row.names(pcdh17SigCpgs),]
+dx <- as.factor(ifelse(as.factor(pData(GRsetPbmcFunFlt)$Dx)=="HC","#0000ff","#ff0000"))
+grObj <- makeGRangesFromDataFrame(data.frame(chr = pcdh17SigCpgs$chr, start = pcdh17SigCpgs$pos, end = pcdh17SigCpgs$pos+1, strand = pcdh17SigCpgs$strand, score = pcdh17SigCpgs$meanDiff))
+
+
+atrack <- AnnotationTrack(grObj, name = "CpG")
+plotTracks(atrack)
+chromosome(atrack) <- 'chr13'
+
+gtrack <- GenomeAxisTrack()
+plotTracks(list(gtrack, atrack))
+
+# genome : "hg19" 
+# gen<-genome(grObj)
+
+gen = "hg19" 
+chr <- as.character(unique(seqnames(grObj)))
+
+# Ideogram track
+itrack <- IdeogramTrack(genome = gen, chromosome = chr)
+plotTracks(list(itrack, gtrack, atrack))
+# geneModels <- data.frame(c(rep("chr13",2)), c(58206655,58205944),c(58303445,58299695),c(96790,93751), c("+","+"),c("protein coding","Nonsense mediated decay"),c("ENSG00000118946" , "ENSG00000118946"),c("ENSG00000118946" , "ENSG00000118946") ,c("ENST00000377918","ENST00000484979"),c("PCDH17","PCDH17"))
+# colnames(geneModels) <- c( "chromosome",    "start",      "end", "width", "strand", "feature","gene",  "exon",      "transcript",     "symbol")
+# 
+# grtrack <- GeneRegionTrack(geneModels, genome = gen, chromosome = chr, name = "Gene Model")
+# chromosome(grtrack) <- 'chr13'
+# plotTracks(list(itrack, gtrack, atrack, grtrack))
+
+##data track
+ # coords <- c(rep(58205001,145),rep(58205045,145), rep(58209133,145))
+# dat <- c(t(betas_pcdh17dmr)[,1], t(betas_pcdh17dmr)[,2],t(betas_pcdh17dmr)[,3] ) 
+mcols(grObj) <- betas_pcdh17dmr
+ # Dx <- ifelse(dx=="IBS","red","blue")
+dx <- factor(targets$Dx)
+
+dtrack <- DataTrack(grObj,groups = as.vector(dx),type= c("b"),aggregateGroups = TRUE,
+           aggregation = "mean")
+plotTracks(dtrack, groups = as.vector(dx), type= "b", aggregateGroups = TRUE,
+           aggregation = "max")
+plotTracks(list(itrack, gtrack, atrack,dtrack))
+
+
+```
+
+```{r}
+## GNAS DMR
+GNASSigCpgs <- PbmcDxDMPs_sig_p05[PbmcDxDMPs_sig_p05$nearestGeneSymbol=="GNAS",]
+GNASSigCpgsPlusStr <- subset(GNASSigCpgs, GNASSigCpgs$strand == "+")
+GNASSigCpgsNegStr <- subset(GNASSigCpgs, GNASSigCpgs$strand == "-")
+
+GNASSigCpgs <- GNASSigCpgsNegStr
+GNASSigCpgs <- GNASSigCpgs[order(GNASSigCpgs$pos),]
+betas_NR4A2dmr <- getBeta(GRsetPbmcFunFltCD)[row.names(getBeta(GRsetPbmcFunFltCD))%in%row.names(GNASSigCpgs),]
+betas_GNASdmr <- betas_Pbmc[row.names(betas_Pbmc)%in%row.names(GNASSigCpgs),]
+dx <- as.factor(pData(GRsetPbmcFunFlt)$Dx)
+grObj <- makeGRangesFromDataFrame(data.frame(chr = GNASSigCpgs$chr, start = GNASSigCpgs$pos, end = GNASSigCpgs$pos+1, strand = GNASSigCpgs$strand, score = GNASSigCpgs$meanDiff))
+
+
+atrack <- AnnotationTrack(grObj, name = "CpG")
+plotTracks(atrack)
+chromosome(atrack) <- 'chr20'
+
+gtrack <- GenomeAxisTrack()
+plotTracks(list(gtrack, atrack))
+
+# genome : "hg19" 
+# gen<-genome(grObj)
+
+gen = "hg19" 
+chr <- as.character(unique(seqnames(grObj)))
+
+# Ideogram track
+itrack <- IdeogramTrack(genome = gen, chromosome = chr)
+plotTracks(list(itrack, gtrack, atrack))
+# geneModels <- data.frame(c(rep("chr20",2)), c(58206655,58205944),c(58303445,58299695),c(96790,93751), c("+","+"),c("protein coding","Nonsense mediated decay"),c("ENSG00000118946" , "ENSG00000118946"),c("ENSG00000118946" , "ENSG00000118946") ,c("ENST00000377918","ENST00000484979"),c("PCDH17","PCDH17"))
+# colnames(geneModels) <- c( "chromosome",    "start",      "end", "width", "strand", "feature","gene",  "exon",      "transcript",     "symbol")
+
+# grtrack <- GeneRegionTrack(geneModels, genome = gen, chromosome = chr, name = "Gene Model")
+# chromosome(grtrack) <- 'chr13'
+# plotTracks(list(itrack, gtrack, atrack, grtrack))
+
+##data track
+ # coords <- c(rep(58205001,145),rep(58205045,145), rep(58209133,145))
+mcols(grObj) <- betas_GNASdmr
+ # Dx <- ifelse(dx=="IBS","red","blue")
+
+dtrack <- DataTrack(grObj,groups = as.vector(dx),type= c("b"),aggregateGroups = TRUE,
+           aggregation = "mean")
+# 
+# plotTracks(dtrack, groups = as.vector(bh), type= "b", aggregateGroups = TRUE,
+#            aggregation = "max")
+plotTracks(list(itrack, gtrack, atrack, dtrack))
+```
+
+######################################################################################
+# BH associated DMPs PBMC
+########################################################################################
+
+
+```{r}
+GRsetPbmcFunFltCD <- GRsetPbmcFunFlt[,colnames(GRsetPbmcFunFlt)%in%c(row.names(pData(GRsetPbmcFunFlt)[which(pData(GRsetPbmcFunFlt)$BH == "C"),]), row.names(pData(GRsetPbmcFunFlt)[which(pData(GRsetPbmcFunFlt)$BH=="D"),]))]
+
+# pbmcBhCDDMP <- dmpFinder(getM(GRsetPbmcFunFltCD),pData(GRsetPbmcFunFltCD)$BH, type = "categorical", qCutoff = 1, shrinkVar = TRUE)
+
+library(minfiData)
+if (require(minfiData)) {
+
+grp <- pData(GRsetPbmcFunFltCD)$BH
+M <- getM(GRsetPbmcFunFltCD)
+B <- getBeta(GRsetPbmcFunFltCD)
+PbmcBhDMPs <- dmpFinder(M, pheno=grp, type="categorical", shrinkVar = TRUE)
+PbmcBhDMPs$Bdiff <- rowMeans(B[row.names(PbmcBhDMPs),colnames(B)%in%row.names(subset(pData(GRsetPbmcFunFltCD), pData(GRsetPbmcFunFltCD)$Dx == "C"))])-rowMeans(B[row.names(PbmcBhDMPs),colnames(B)%in%row.names(subset(pData(GRsetPbmcFunFltCD), pData(GRsetPbmcFunFltCD)$BH == "D"))])
+sum(PbmcBhDMPs$qval < 0.05, na.rm=TRUE)
+head(PbmcBhDMPs)
+ann450kSub <- ann450kSub[row.names(ann450kSub)%in%row.names(PbmcBhDMPs),]
+ann450kSub <- ann450kSub[row.names(PbmcBhDMPs),]
+PbmcBhDMPs <- cbind(PbmcBhDMPs,ann450kSub)
+}
+
+```
+
+
+
+```{r}
+ann450kSub <- hm450annotations[match(featureNames(GRsetPbmcFunFlt), hm450annotations$Name),c(1:4,12:19,24:ncol(hm450annotations))] 
+
+mVals_p <- getM(GRsetPbmcFunFlt)
+head(mVals_p[,1:5])
+betaVals_p <- getBeta(GRsetPbmcFunFlt)
+head(betaVals_p[,1:5])
+
+# factor of interest
+bh <- factor(pData(GRsetPbmcFunFlt)$BH)
+
+# variable to correct for- coupld potenitally correct for age, but leave it out
+
+# use the above to create a design matrix
+design <- model.matrix(~ 0 + bh, data=pData(GRsetPbmcFunFlt))
+colnames(design) <- c("bhC", "bhD", "bhM", "bhN")
+
+# fit the linear model 
+fit <- lmFit(mVals_p, design)
+
+# create a contrast matrix for specific comparisons
+contMatrix <- makeContrasts(bhC-bhN, bhD-bhN,bhM-bhN, bhC-bhD,bhM-bhD, bhM-bhC,levels=design)
+contMatrix
+
+# fit the contrasts
+fit2 <- contrasts.fit(fit, contMatrix)
+fit2 <- eBayes(fit2,trend=TRUE)
+
+# look at the numbers of DM CpGs at FDR < 0.05
+summary(decideTests(fit2))
+#  bhC - bhN bhD - bhN bhM - bhN bhC - bhD bhM - bhD bhM - bhC
+# -1         0         0         0         0         0         0
+# 0     420257    420257    420257    420257    420257    420257
+# 1          0         0         0         0         0         0
+
+# get the table of results for the first contrast 
+DMPs_CN <-  topTable(fit2, num=Inf, coef=1, genelist=ann450kSub)
+DMPs_CN$meanDiff <- rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$BH ==  "C"))])-rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$BH ==  "N"))])
+DMPs_CNp001 <- subset(DMPs_CN, DMPs_CN$P.Value<0.001); dim(DMPs_CNp001)
+# [1] 150  33
+
+DMPs_DN <-  topTable(fit2, num=Inf, coef=2, genelist=ann450kSub)
+DMPs_DN$meanDiff <- rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$BH ==  "D"))])-rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$BH ==  "N"))])
+DMPs_DNp001 <- subset(DMPs_DN, DMPs_DN$P.Value<0.001); dim(DMPs_DNp001)
+# [1] 229  33
+
+DMPs_MN <-  topTable(fit2, num=Inf, coef=3, genelist=ann450kSub)
+DMPs_MN$meanDiff <- rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$BH ==  "M"))])-rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$BH ==  "N"))])
+DMPs_MNp001 <- subset(DMPs_MN, DMPs_MN$P.Value<0.001); dim(DMPs_MNp001)
+# [1] 394  33
+
+DMPs_CD <- topTable(fit2, num=Inf, coef=4, genelist = ann450kSub)
+DMPs_CD$meanDiff <- rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$BH ==  "C"))])-rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$BH ==  "D"))])
+DMPs_CD_sig <- subset(DMPs_CD, DMPs_CD$adj.P.Val <0.05); dim(DMPs_CD_sig)
+DMPs_CDp001 <- subset(DMPs_CD, DMPs_CD$P.Value<0.001); dim(DMPs_CDp001)
+DMPs_CDp05 <- subset(DMPs_CD, DMPs_CD$P.Value<0.05); dim(DMPs_CDp05)
+
+GRsetPbmcFunFltCD <- GRsetPbmcFunFlt[,colnames(GRsetPbmcFunFlt)%in%c(row.names(pData(GRsetPbmcFunFlt)[which(pData(GRsetPbmcFunFlt)$BH == "C"),]), row.names(pData(GRsetPbmcFunFlt)[which(pData(GRsetPbmcFunFlt)$BH=="D"),]))]
+
+
+if (require(minfiData)) {
+grp <- pData(GRsetPbmcFunFltCD)$BH
+M <- getM(GRsetPbmcFunFltCD)
+dmpCD <- dmpFinder(M, pheno=grp, type="categorical", shrinkVar = TRUE)
+sum(dmpCD$qval < 0.05, na.rm=TRUE)
+head(dmpCD)
+
+}
+```
+
+```{r setup}
+# Set working directory outside the chunks
+knitr::opts_knit$set(root.dir = normalizePath("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/"))
+```
+# DMRs
+```{r}
+# C and D only
+
+# targets <- pData(GRsetPbmcFunFltCD)
+bh <- factor(pData(GRsetPbmcFunFltCD)$BH)
+design <- model.matrix(~0+bh, data=pData(GRsetPbmcFunFltCD))
+colnames(design) <- levels(bh)
+contMatrix <- makeContrasts(C-D, levels=design)
+contMatrix
+myAnnotation <- cpg.annotate(object = getM(GRsetPbmcFunFltCD), datatype = "array", what = "M", analysis.type = "differential", design = design, contrasts = TRUE, cont.matrix = contMatrix, coef = "C - D", arraytype = "450K")
+
+str(myAnnotation)
+# List of 7
+#  $ ID    : Factor w/ 420257 levels "cg00000029","cg00000108",..: 222425 374552 248925 18571 277135 194037 362374 266425 100898 55258 ...
+#  $ stat  : num [1:420257] 0.988 0.626 -0.511 -0.166 0.138 ...
+#  $ CHR   : Factor w/ 22 levels "chr1","chr10",..: 1 1 1 1 1 1 1 1 1 1 ...
+#  $ pos   : int [1:420257] 15865 534242 710097 714177 720865 758829 763119 779995 805102 805338 ...
+#  $ betafc: num [1:420257] 0.00969 0.004969 -0.003749 -0.000111 0.000572 ...
+#  $ indfdr: num [1:420257] 0.99 0.991 0.991 0.997 0.998 ...
+#  $ is.sig: logi [1:420257] FALSE FALSE FALSE FALSE FALSE FALSE ...
+#  - attr(*, "row.names")= int [1:420257] 1 2 3 4 5 6 7 8 9 10 ...
+#  - attr(*, "class")= chr "annot"
+
+DMRs <- dmrcate(myAnnotation, lambda=1000, C=2, pcutoff = 0.001)
+head(DMRs$results); dim(DMRs$results)
+DMRsInt<- DMRs$results[order(-DMRs$results$no.cpgs),]
+
+# convert the regions to annotated genomic ranges
+# data(dmrcatedata)
+results.ranges <- extractRanges(DMRs, genome = "hg19")
+results.ranges.sort<- data.frame(results.ranges)[order(-data.frame(results.ranges)$no.cpgs),]
+# # set up the grouping variables and colours
+# pal <- brewer.pal(3,"Dark2")
+# groups <- pal[1:length(unique(targets$Dx))]
+# names(groups) <- levels(factor(targets$Dx))
+# cols <- groups[as.character(factor(targets$Dx))]
+# samps <- 1:nrow(targets)
+# 
+# # draw the plot for the top DMR
+# png("temp/functional_norm/methBioconductorWorkflow/pbmc/PbmcDxDMR1_STC1.png", height = 2000, width = 2000, res = 250)
+# DMR.plot(ranges=results.ranges, dmr=1, CpGs=getBeta(GRsetPbmcFunFlt), phen.col=cols, what = "Beta",      arraytype = "450K", pch=16, toscale=FALSE, plotmedians=TRUE,   genome="hg19", samps=samps)
+# dev.off()
+
+```
+
+```{r}
+## NR4A2 DMR
+NR4A2SigCpgs <- DMPs_CDp05[DMPs_CDp05$UCSC_RefGene_Name =="NR4A2",]
+NR4A2SigCpgsPlusStr <- subset(NR4A2SigCpgs, NR4A2SigCpgs$strand == "+")
+NR4A2SigCpgsNegStr <- subset(NR4A2SigCpgs, NR4A2SigCpgs$strand == "-")
+
+NR4A2SigCpgs <- NR4A2SigCpgsNegStr
+NR4A2SigCpgs <- NR4A2SigCpgs[order(NR4A2SigCpgs$pos),]
+betas_NR4A2dmr <- getBeta(GRsetPbmcFunFltCD)[row.names(getBeta(GRsetPbmcFunFltCD))%in%row.names(NR4A2SigCpgs),]
+bh <- as.factor(pData(GRsetPbmcFunFltCD)$BH)
+betas_NR4A2dmr <- betas_NR4A2dmr[row.names(NR4A2SigCpgs),]
+grObj <- makeGRangesFromDataFrame(data.frame(chr = NR4A2SigCpgs$chr, start = NR4A2SigCpgs$pos, end = NR4A2SigCpgs$pos+1, strand = NR4A2SigCpgs$strand, score = NR4A2SigCpgs$meanDiff))
+
+
+atrack <- AnnotationTrack(grObj, name = "CpG")
+plotTracks(atrack)
+chromosome(atrack) <- 'chr2'
+
+gtrack <- GenomeAxisTrack()
+plotTracks(list(gtrack, atrack))
+
+# genome : "hg19" 
+# gen<-genome(grObj)
+
+gen = "hg19" 
+chr <- as.character(unique(seqnames(grObj)))
+
+# Ideogram track
+itrack <- IdeogramTrack(genome = gen, chromosome = chr)
+plotTracks(list(itrack, gtrack, atrack))
+# geneModels <- data.frame(c(rep("chr20",2)), c(58206655,58205944),c(58303445,58299695),c(96790,93751), c("+","+"),c("protein coding","Nonsense mediated decay"),c("ENSG00000118946" , "ENSG00000118946"),c("ENSG00000118946" , "ENSG00000118946") ,c("ENST00000377918","ENST00000484979"),c("PCDH17","PCDH17"))
+# colnames(geneModels) <- c( "chromosome",    "start",      "end", "width", "strand", "feature","gene",  "exon",      "transcript",     "symbol")
+
+# grtrack <- GeneRegionTrack(geneModels, genome = gen, chromosome = chr, name = "Gene Model")
+# chromosome(grtrack) <- 'chr13'
+# plotTracks(list(itrack, gtrack, atrack, grtrack))
+
+##data track
+ # coords <- c(rep(58205001,145),rep(58205045,145), rep(58209133,145))
+mcols(grObj) <- betas_NR4A2dmr
+ bhCol <- ifelse(bh=="C","red","green")
+dtrack <- DataTrack(grObj,groups = as.vector(bh),type= c("b"),aggregateGroups = TRUE,
+           aggregation = "mean")
+# 
+# plotTracks(dtrack, groups = as.vector(bh), type= "b", aggregateGroups = TRUE,
+#            aggregation = "max")
+plotTracks(list(itrack, gtrack, atrack, dtrack))
+```
+
+```{r}
+## HOXA5/6 DMR
+HOXA5SigCpgs <- DMPs_CDp05[DMPs_CDp05$UCSC_RefGene_Name =="HOXA5",]
+HOXA5SigCpgsPlusStr <- subset(HOXA5SigCpgs, HOXA5SigCpgs$strand == "+")
+HOXA5SigCpgsNegStr <- subset(HOXA5SigCpgs, HOXA5SigCpgs$strand == "-")
+
+HOXA5SigCpgs <- HOXA5SigCpgsPlusStr
+HOXA5SigCpgs <- HOXA5SigCpgs[order(HOXA5SigCpgs$pos),]
+betas_HOXA5dmr <- getBeta(GRsetPbmcFunFltCD)[row.names(getBeta(GRsetPbmcFunFltCD))%in%row.names(HOXA5SigCpgs),]
+bh <- as.factor(pData(GRsetPbmcFunFltCD)$BH)
+grObj <- makeGRangesFromDataFrame(data.frame(chr = HOXA5SigCpgs$chr, start = HOXA5SigCpgs$pos, end = HOXA5SigCpgs$pos+1, strand = HOXA5SigCpgs$strand, score = HOXA5SigCpgs$meanDiff))
+
+
+atrack <- AnnotationTrack(grObj, name = "CpG")
+plotTracks(atrack)
+chromosome(atrack) <- 'chr7'
+
+gtrack <- GenomeAxisTrack()
+plotTracks(list(gtrack, atrack))
+
+# genome : "hg19" 
+# gen<-genome(grObj)
+
+gen = "hg19" 
+chr <- as.character(unique(seqnames(grObj)))
+
+# Ideogram track
+itrack <- IdeogramTrack(genome = gen, chromosome = chr)
+plotTracks(list(itrack, gtrack, atrack))
+# geneModels <- data.frame(c(rep("chr20",2)), c(58206655,58205944),c(58303445,58299695),c(96790,93751), c("+","+"),c("protein coding","Nonsense mediated decay"),c("ENSG00000118946" , "ENSG00000118946"),c("ENSG00000118946" , "ENSG00000118946") ,c("ENST00000377918","ENST00000484979"),c("PCDH17","PCDH17"))
+# colnames(geneModels) <- c( "chromosome",    "start",      "end", "width", "strand", "feature","gene",  "exon",      "transcript",     "symbol")
+
+# grtrack <- GeneRegionTrack(geneModels, genome = gen, chromosome = chr, name = "Gene Model")
+# chromosome(grtrack) <- 'chr13'
+# plotTracks(list(itrack, gtrack, atrack, grtrack))
+
+##data track
+ # coords <- c(rep(58205001,145),rep(58205045,145), rep(58209133,145))
+
+mcols(grObj) <- betas_HOXA5dmr
+dtrack <- DataTrack(grObj,groups = as.vector(bh),type= c("b"),aggregateGroups = TRUE,
+           aggregation = "mean")
+# 
+# plotTracks(dtrack, groups = as.vector(bh), type= "b", aggregateGroups = TRUE,
+#            aggregation = "max")
+plotTracks(list(itrack, gtrack, atrack, dtrack))
+```
+
+```{r setup}
+# Set working directory outside the chunks
+knitr::opts_knit$set(root.dir = normalizePath("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/"))
+```
+
+# Heatmap and boxplot
+```{r}
+# heatmap
+png("temp/functional_norm/methBioconductorWorkflow/pbmc/PbmcDxp001heatmap.png", height = 2000, width = 2000, res = 250)
+heatmapMeth(GRsetPbmcFunFlt, row.names(PbmcDxDMPs_sig_p001), pData(GRsetPbmcFunFlt)$Dx, pData(GRsetPbmcFunFlt)$BH, pData(GRsetPbmcFunFlt)$Gender)
+dev.off()
+
+# box plots
+library(ggplot2)
+# plot the top 4 most significantly differentially methylated CpGs 
+PbmcDxDMPs_sig_p001 <- PbmcDxDMPs_sig_p001[order(-PbmcDxDMPs_sig_p001$meanDiff),]
+dmp <- 1:16
+df <- cbind(as.data.frame(t(getBeta(GRsetPbmcFunFlt)[row.names(GRsetPbmcFunFlt)%in%rownames(PbmcDxDMPs_sig_p001)[dmp],])), pData(GRsetPbmcFunFlt)$BH, pData(GRsetPbmcFunFlt)$Dx) 
+
+colnames(df)[-c(dim(df)[2],dim(df)[2]-1)] <- PbmcDxDMPs_sig_p001[dmp,][,26]
+colnames(df)[which(duplicated(colnames(df)))] <- paste(colnames(df)[which(duplicated(colnames(df)))],"_1",sep="")
+colnames(df)[dim(df)[2]] <- "Dx"
+colnames(df)[dim(df)[2]-1] <- "BH"
+colnames(df) <- gsub("-","_",colnames(df))
+
+library(gridExtra)   
+png("temp/functional_norm/methBioconductorWorkflow/pbmc/Pbmc_Dx001p_dmp1_16.png", height = 3000, width  =3000,res =250)
+
+plots = NULL
+for (cpg in colnames(df)[-c(dim(df)[2],dim(df)[2]-1)]) {
+        plots[[cpg]] = ggplot(df, aes_string("Dx", cpg)) + geom_boxplot(outlier.shape = NA) + geom_jitter(aes(color = df$BH))
+        }
+
+grid.arrange(plots[[1]],plots[[2]],plots[[3]],plots[[4]],
+             plots[[5]],plots[[6]],plots[[7]],plots[[8]],
+             plots[[9]],plots[[10]],plots[[11]],plots[[12]],
+             plots[[13]],plots[[14]],plots[[15]],plots[[16]],
+            ncol = 4)
+dev.off()
+```
+# Dx Gender and interaction assocaiated DMPs
+```{r}
+# Dx Gender interaction
+pData(GRsetPbmcFunFlt)$ibsGenInt <- interaction(pData(GRsetPbmcFunFlt)$Dx,pData(GRsetPbmcFunFlt)$Gender)
+pData(GRsetPbmcFunFlt)$ibsGenInt <- gsub("\\.","_", pData(GRsetPbmcFunFlt)$ibsGenInt)
+dmpsIntPbmc <- DMPsInt(GRsetPbmcFunFlt,factor(pData(GRsetPbmcFunFlt)$ibsGenInt), ann450kSub)
+
+mVals_p <- getM(GRsetPbmcFunFlt)
+head(mVals_p[,1:5])
+betaVals_p <- getBeta(GRsetPbmcFunFlt)
+head(betaVals_p[,1:5])
+
+# factor of interest
+Dx <- factor(pData(GRsetPbmcFunFlt)$Dx)
+Gender <- factor(pData(GRsetPbmcFunFlt)$Gender)
+
+# variable to correct for- coupld potenitally correct for age, but leave it out
+
+# use the above to create a design matrix
+design <- model.matrix(~ 0 + Dx:Gender, data=pData(GRsetPbmcFunFlt))
+colnames(design) <- c("HC_F", "IBS_F", "HC_M", "IBS_M")
+
+# fit the linear model 
+fit <- lmFit(mVals_p, design)
+
+# create a contrast matrix for specific comparisons
+contMatrix <- makeContrasts(IBS_M-HC_M, IBS_F-HC_F,IBS_M-IBS_F, HC_M-HC_F,   levels=design)
+contMatrix
+
+# fit the contrasts
+fit2 <- contrasts.fit(fit, contMatrix)
+fit2 <- eBayes(fit2)
+
+# look at the numbers of DM CpGs at FDR < 0.05
+summary(decideTests(fit2))
+# 
+#   IBS_M - HC_M IBS_F - HC_F IBS_M - IBS_F HC_M - HC_F
+# -1            0            0           381         202
+# 0        420257       420257        419626      420002
+# 1             0            0           250          53
+
+# get the table of results for the first contrast (naive - rTreg)
+ann450kSub <- hm450annotations[match(rownames(mVals_p),hm450annotations$Name),
+                      c(1:4,12:19,24:ncol(hm450annotations))]
+DMPs_IBS_M_HC_M <-  topTable(fit2, num=Inf, coef=1, genelist=ann450kSub)
+DMPs_IBS_M_HC_M$meanDiff <- rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$ibsGenInt ==  "IBS_M"))])-rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$ibsGenInt ==  "HC_M"))])
+
+DMPs_IBS_F_HC_F <-  topTable(fit2, num=Inf, coef=2, genelist=ann450kSub)
+DMPs_IBS_F_HC_F$meanDiff <- rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$ibsGenInt ==  "IBS_F"))])-rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$ibsGenInt ==  "HC_F"))])
+
+DMPs_IBS_M_IBS_F <-  topTable(fit2, num=Inf, coef=3, genelist=ann450kSub)
+DMPs_IBS_M_IBS_F$meanDiff <- rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$ibsGenInt ==  "IBS_M"))])-rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$ibsGenInt ==  "IBS_F"))])
+
+DMPs_HC_M_HC_F <- topTable(fit2, num=Inf, coef=4, genelist=ann450kSub)
+DMPs_HC_M_HC_F$meanDiff <- rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$ibsGenInt ==  "HC_M"))])-rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetPbmcFunFlt), pData(GRsetPbmcFunFlt)$ibsGenInt ==  "HC_F"))])
+
+# remove HC Gender probes from IBS
+DMPs_IBS_M_IBS_F_sig <- subset(DMPs_IBS_M_IBS_F, DMPs_IBS_M_IBS_F$adj.P.Val<0.05); dim(DMPs_IBS_M_IBS_F_sig)
+# [1] 631    33
+
+DMPs_HC_M_HC_F_sig <- subset(DMPs_HC_M_HC_F, DMPs_HC_M_HC_F$adj.P.Val<0.05); dim(DMPs_HC_M_HC_F_sig)
+# [1] 255  33
+
+DMPs_HC_M_HC_F_sig <- subset(DMPs_HC_M_HC_F, DMPs_HC_M_HC_F$P.Value<0.05); dim(DMPs_HC_M_HC_F_sig)
+# [1] 48568    33
+
+
+DMPs_IBS_M_IBS_F_sig1 <- DMPs_IBS_M_IBS_F_sig[!row.names(DMPs_IBS_M_IBS_F_sig)%in%row.names(DMPs_HC_M_HC_F_sig),]; dim(DMPs_IBS_M_IBS_F_sig1)
+
+# [1] 224  33
+```
+
+```{r}
+
+PbmcGenderDMPs <- DMPs(GRsetPbmcFunFlt,factor(pData(GRsetPbmcFunFlt)$Gender), ann450kSub)
+PbmcGenderDMPs_sig <- subset(PbmcGenderDMPs, PbmcGenderDMPs$adj.P.Val<0.05); dim(PbmcGenderDMPs_sig)
+# [1] 2278   33
+```
+
+```{r}
+DMPs_IBS_M_IBS_F_sig2 <- DMPs_IBS_M_IBS_F_sig1[!row.names(DMPs_IBS_M_IBS_F_sig1)%in%row.names(PbmcGenderDMPs_sig),]; dim(DMPs_IBS_M_IBS_F_sig2)
+# [1] 28    33
+
+DMPs_IBS_M_IBS_F_sig3 <- subset(DMPs_IBS_M_IBS_F_sig2, DMPs_IBS_M_IBS_F_sig2$adj.P.Val<0.01);dim(DMPs_IBS_M_IBS_F_sig3)
+# [1] 0   33
+
+# DMPs_IBS_M_IBS_F_sig3 <- subset(DMPs_IBS_M_IBS_F_sig2, DMPs_IBS_M_IBS_F_sig2$meanDiff>=0.02|DMPs_IBS_M_IBS_F_sig2$meanDiff< -0.02); dim(DMPs_IBS_M_IBS_F_sig3)
+# 
+# save(DMPs_IBS_M_IBS_F_sig2, file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/pbmc/DMPs_IBS_M_IBS_F_sig2.rda")
+# 
+# write.csv(DMPs_IBS_M_IBS_F_sig3, file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/pbmc/DMPs_IBS_M_IBS_F_sig2_28.csv")
+
+```
+
+```{r}
+## same results from making an interaction variable.
+
+
+
+dmpsIntPbmc <- read.csv("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/pbmc/dmpsIntPbmc.csv", row.names = 4)
+
+ibs_m_f_sig <- subset(dmpsIntPbmc[[3]], dmpsIntPbmc[[3]]$adj.P.Val<0.05); dim(ibs_m_f_sig)
+# [1] 40280    33
+hc_m_f_sig <- subset(dmpsIntPbmc[[4]], dmpsIntPbmc[[4]]$adj.P.Val<0.05); dim(hc_m_f_sig)
+# # [1] 453  33 
+ibs_m_f_sig1 <- ibs_m_f_sig[!row.names(ibs_m_f_sig)%in%row.names(hc_m_f_sig),]; dim(ibs_m_f_sig1)
+# # [1] 39990    33
+
+## very few gender differences in HC compared to IBS.use p value instead to remove as many gender assocaited probes as possible.
+hc_m_f_sig <- subset(dmpsIntPbmc[[4]], dmpsIntPbmc[[4]]$P.Value<0.05); dim(hc_m_f_sig)
+# [1] 30448    33
+ibs_m_f_sig1 <- ibs_m_f_sig[!row.names(ibs_m_f_sig)%in%row.names(hc_m_f_sig),]; dim(ibs_m_f_sig1)
+# [1] 37363    33
+
+# IBS HC differences within 1. Women 2. men
+f_ibs_hc_sig <- subset(dmpsIntPbmc[[1]], dmpsIntPbmc[[1]]$adj.P.Val<0.05); dim(f_ibs_hc_sig)
+# [1]  2 33
+m_ibs_hc_sig<- subset(dmpsIntPbmc[[2]], dmpsIntPbmc[[2]]$adj.P.Val<0.05); dim(m_ibs_hc_sig)
+# [1] 15 33
+
+## try to remove general gender differences
+ibs_m_f_sig2 <- ibs_m_f_sig[!row.names(ibs_m_f_sig)%in%row.names(PbmcGenderDMPs_sig),]; dim(ibs_m_f_sig2)
+# [1] 31759    33 
+ibs_m_f_sig3 <- ibs_m_f_sig2[!row.names(ibs_m_f_sig2)%in%row.names(hc_m_f_sig),]; dim(ibs_m_f_sig3)
+# [1] 30821    33 ### final
+
+ibs_m_f_sig3fdr01 <- subset(ibs_m_f_sig3, ibs_m_f_sig3$adj.P.Val<0.01); dim(ibs_m_f_sig3fdr01)
+# [1] 5788   33
+
+# ibs_m_f_sig3fdr01md <- subset(ibs_m_f_sig3fdr01, ibs_m_f_sig3fdr01$meanDiff >0.3 | ibs_m_f_sig3fdr01$meanDiff < -0.3); dim(ibs_m_f_sig3fdr01md )
+
+```
+
+```{r setup}
+# Set working directory outside the chunks
+knitr::opts_knit$set(root.dir = normalizePath("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/"))
+```
+
+```{r}
+#################### save the results
+
+write.table(PbmcDxDMPs, file="temp/functional_norm/methBioconductorWorkflow/pbmc/PbmcDxDMPs.csv", sep=",", row.names=FALSE)
+
+write.table(PbmcDxDMPs_sig_p001, file="temp/functional_norm/methBioconductorWorkflow/pbmc/PbmcDxDMPs_sig_p001.csv", sep=",", row.names=FALSE)
+
+write.table(PbmcGenderDMPs, file="temp/functional_norm/methBioconductorWorkflow/pbmc/PbmcGenderDMPs.csv", sep=",", row.names=FALSE)
+
+write.table(dmpsIntPbmc, file = "temp/functional_norm/methBioconductorWorkflow/pbmc/dmpsIntPbmc.csv", sep=",", row.names=FALSE)
+
+write.table(f_ibs_hc_sig, file="temp/functional_norm/methBioconductorWorkflow/pbmc/Pbmc_f_ibs_hc_sig.csv", sep=",", row.names=FALSE)
+
+write.table(m_ibs_hc_sig, file="temp/functional_norm/methBioconductorWorkflow/pbmc/Pbmc_m_ibs_hc_sig.csv", sep=",", row.names=FALSE)
+
+write.table(ibs_m_f_sig2, file="temp/functional_norm/methBioconductorWorkflow/pbmc/Pbmc_ibs_m_f_sig2.csv", sep=",", row.names=FALSE)
+
+# write.table(ibs_m_f_sig3, file="temp/functional_norm/methBioconductorWorkflow/pbmc/Pbmc_ibs_m_f_sig_final.csv", sep=",", row.names=FALSE)
+
+write.table(PbmcGenderDMPs_sig, file="temp/functional_norm/methBioconductorWorkflow/pbmc/PbmcGenderDMPs_sig.csv", sep=",", row.names=FALSE)
+
+write.table(PbmcDxDMPs_sig_p05, file="temp/functional_norm/methBioconductorWorkflow/pbmc/PbmcDxDMPs_sig_p05.csv", sep=",", row.names=FALSE)
+
+
+save(dmpsIntPbmc , file = "temp/functional_norm/methBioconductorWorkflow/pbmc/Pbmc_dmpsIntPbmc.rda")
+```
+
+
+
+######################################################################################
+# Dx associated DMPs in Colon
+######################################################################################
+
+```{r}
+load("temp/functional_norm/methBioconductorWorkflow/GRsetPbmcColFunFlt.Rda")
+load("temp/hm450annotations.rda")
+ann450kSub <- hm450annotations[match(featureNames(GRsetColFunFlt),hm450annotations$Name),c(1:4,12:19,24:ncol(hm450annotations))] 
+# ColDxDMPs <- DMPs(GRsetColFunFlt,factor(pData(GRsetColFunFlt)$Dx), ann450kSub)
+# ColDxDMP <- dmpFinder(getM(GRsetColFunFlt),pData(GRsetColFunFlt)$Dx, type = "categorical", qCutoff = 1, shrinkVar = TRUE)
+
+library(minfiData)
+if (require(minfiData)) {
+
+grp <- as.factor(pData(GRsetColFunFlt)$Dx)
+M <- getM(GRsetColFunFlt)
+B <- getBeta(GRsetColFunFlt)
+ColDxDMPs <- dmpFinder(M, pheno=grp, type="categorical", shrinkVar = TRUE)
+ColDxDMPs$Bdiff <- rowMeans(B[row.names(ColDxDMPs),colnames(B)%in%row.names(subset(pData(GRsetColFunFlt), pData(GRsetColFunFlt)$Dx == "IBS"))])-rowMeans(B[row.names(ColDxDMPs),colnames(B)%in%row.names(subset(pData(GRsetColFunFlt), pData(GRsetColFunFlt)$Dx == "HC"))])
+sum(ColDxDMPs$qval < 0.05, na.rm=TRUE)
+head(ColDxDMPs)
+ann450kSub <- ann450kSub[row.names(ann450kSub)%in%row.names(ColDxDMPs),]
+ann450kSub <- ann450kSub[row.names(ColDxDMPs),]
+ColDxDMPs <- cbind(ColDxDMPs,ann450kSub)
+}
+
+
+save(ColDxDMPs, file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/colon/ColDxDMPs.rda")
+write.csv(ColDxDMPs, file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/colon/ColDxDMPs.csv")
+# ColDxDMPs <- read.csv("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/colon/ColDxDMPs.csv", row.names = 1)
+ColDxDMPs_sig <- subset(ColDxDMPs, ColDxDMPs$qval<0.05); dim(ColDxDMPs_sig)
+# [1]  0 31
+ColDxDMPs_sig_p05 <- subset(ColDxDMPs, ColDxDMPs$pval<0.05); dim(ColDxDMPs_sig_p05)
+# [1] 17151    31
+ColDxDMPs_sig_p001 <- subset(ColDxDMPs, ColDxDMPs$pval<0.001); dim(ColDxDMPs_sig_p001)
+# [1] 231  31
+write.csv(ColDxDMPs_sig_p001, file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/colon/ColDxDMPs_sig_p001.csv")
+
+betas_Col <- getBeta(GRsetColFunFlt)
+design <- model.matrix(~0+pData(GRsetColFunFlt)$Dx, data=pData(GRsetColFunFlt))
+  colnames(design) <- levels(factor(pData(GRsetColFunFlt)$Dx))
+  fit <- lmFit(betas_Col, design)
+  contMatrix <- makeContrasts(IBS-HC ,levels=design)
+  fit2 <- contrasts.fit(fit, contMatrix)
+  fit2 <- eBayes(fit2,robust=T, trend=T)
+  tt <- topTable(fit2, coef=1,number=Inf, genelist=ann450kSub)
+  
+  md1 <- rowMeans(betas_Col[,colnames(betas_Col)%in%row.names(subset(pData(GRsetColFunFlt), pData(GRsetColFunFlt)$Dx ==  levels(as.factor(pData(GRsetColFunFlt)$Dx))[2]))]) - rowMeans(betas_Col[,colnames
+(betas_Col)%in%row.names(subset(pData(GRsetColFunFlt), pData(GRsetColFunFlt)$Dx ==  levels(as.factor(pData(GRsetColFunFlt)$Dx))[1]))])
+  tt$meanDiff <- md1
+library(limma)
+library(missMethyl)
+gst.KEGG <- gometh(sig.cpg=rownames(ColDxDMPs), all.cpg=rownames(betas_Col),  prior.prob = T)
+gst.KEGG <- gst.KEGG[order(gst.KEGG$P.DE),]
+gst.KEGG  <- gst.KEGG[gst.KEGG$FDR<0.05,]
+
+# ann <- missMethyl:::.flattenAnn(fit2)
+# m <- match(rownames(fit2), ann$cpg)
+# EntrezID <- ann$entrezid[m]
+# n <- table(EntrezID)
+# k <- kegga(fit2, geneid=EntrezID, covariate=n[EntrezID])
+# topKEGG(k)
+
+
+
+```
+
+```{r setup}
+# Set working directory outside the chunks
+knitr::opts_knit$set(root.dir = normalizePath("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/"))
+```
+
+# DMRs
+```{r}
+
+library(Gviz)
+library(GenomicRanges)
+library(DMRcate)
+
+targets <- pData(GRsetColFunFlt)
+dx <- factor(targets$Dx)
+design <- model.matrix(~0+dx, data=targets)
+colnames(design) <- levels(dx)
+contMatrix <- makeContrasts(IBS-HC,   levels=design)
+contMatrix
+
+myAnnotation <- cpg.annotate(object = getM(GRsetColFunFlt), datatype = "array", what = "M", analysis.type = "differential", design = design, contrasts = TRUE, cont.matrix = contMatrix, coef = "IBS - HC", arraytype = "450K")
+
+str(myAnnotation)
+# List of 7
+#  $ ID    : Factor w/ 420257 levels "cg00000029","cg00000108",..: 222425 374552 248925 18571 277135 194037 362374 266425 100898 55258 ...
+#  $ stat  : num [1:420257] 1.147 -1.432 -1.325 -0.14 0.525 ...
+#  $ CHR   : Factor w/ 22 levels "chr1","chr10",..: 1 1 1 1 1 1 1 1 1 1 ...
+#  $ pos   : int [1:420257] 15865 534242 710097 714177 720865 758829 763119 779995 805102 805338 ...
+#  $ betafc: num [1:420257] 0.007454 -0.009607 -0.007387 0.000266 0.002034 ...
+#  $ indfdr: num [1:420257] 0.996 0.996 0.996 0.998 0.996 ...
+#  $ is.sig: logi [1:420257] FALSE FALSE FALSE FALSE FALSE FALSE ...
+#  - attr(*, "row.names")= int [1:420257] 1 2 3 4 5 6 7 8 9 10 ...
+#  - attr(*, "class")= chr "annot"
+
+
+DMRs <- dmrcate(myAnnotation, lambda=1000, C=2, pcutoff = 0.001)
+head(DMRs$results); dim(DMRs$results)
+DMRsInt<- DMRs$results[order(-DMRs$results$no.cpgs),]
+
+
+# convert the regions to annotated genomic ranges
+# data(dmrcatedata)
+results.ranges <- extractRanges(DMRs, genome = "hg19")
+save(results.ranges, file = "temp/functional_norm/methBioconductorWorkflow/colon/ColDMRs_p001.csv")
+# set up the grouping variables and colors
+library(RColorBrewer)
+pal <- brewer.pal(3,"Dark2")
+groups <- pal[1:length(unique(targets$Dx))]
+names(groups) <- levels(factor(targets$Dx))
+cols <- groups[as.character(factor(targets$Dx))]
+samps <- 1:nrow(targets)
+
+# draw the plot for the top DMR
+png("temp/functional_norm/methBioconductorWorkflow/colon/ColDxDMR1.png", height = 2000, width = 2000, res = 250)
+DMR.plot(ranges = results.ranges, dmr=1, CpGs=getBeta(GRsetColFunFlt), phen.col=cols, what = "Beta",      arraytype = "450K", pch=16, toscale=TRUE, plotmedians=TRUE,   genome="hg19", samps=samps)
+dev.off()
+
+```
+
+```{r}
+## SLC38A4 DMR
+pcdh17SigCpgs <- ColDxDMPs_sig_p05[ColDxDMPs_sig_p05$nearestGeneSymbol=="SLC38A4",] # 3rd in in opp direction
+pcdh17SigCpgsPlusStr <- subset(pcdh17SigCpgs, pcdh17SigCpgs$strand == "+")
+pcdh17SigCpgsNegStr <- subset(pcdh17SigCpgs, pcdh17SigCpgs$strand == "-")
+
+pcdh17SigCpgs <- pcdh17SigCpgsPlusStr
+pcdh17SigCpgs <- pcdh17SigCpgs[order(pcdh17SigCpgs$pos),]
+betas_pcdh17dmr <- betas_Col[row.names(betas_Col)%in%row.names(pcdh17SigCpgs),]
+betas_pcdh17dmr <- betas_Col[row.names(pcdh17SigCpgs),]
+dx <- as.factor(ifelse(as.factor(pData(GRsetColFunFlt)$Dx)=="HC","#0000ff","#ff0000"))
+grObj <- makeGRangesFromDataFrame(data.frame(chr = pcdh17SigCpgs$chr, start = pcdh17SigCpgs$pos, end = pcdh17SigCpgs$pos+1, strand = pcdh17SigCpgs$strand, score = pcdh17SigCpgs$meanDiff))
+
+
+atrack <- AnnotationTrack(grObj, name = "CpG")
+plotTracks(atrack)
+chromosome(atrack) <- 'chr13'
+
+gtrack <- GenomeAxisTrack()
+plotTracks(list(gtrack, atrack))
+
+# genome : "hg19" 
+# gen<-genome(grObj)
+
+gen = "hg19" 
+chr <- as.character(unique(seqnames(grObj)))
+
+# Ideogram track
+itrack <- IdeogramTrack(genome = gen, chromosome = chr)
+plotTracks(list(itrack, gtrack, atrack))
+# geneModels <- data.frame(c(rep("chr13",2)), c(58206655,58205944),c(58303445,58299695),c(96790,93751), c("+","+"),c("protein coding","Nonsense mediated decay"),c("ENSG00000118946" , "ENSG00000118946"),c("ENSG00000118946" , "ENSG00000118946") ,c("ENST00000377918","ENST00000484979"),c("PCDH17","PCDH17"))
+# colnames(geneModels) <- c( "chromosome",    "start",      "end", "width", "strand", "feature","gene",  "exon",      "transcript",     "symbol")
+# 
+# grtrack <- GeneRegionTrack(geneModels, genome = gen, chromosome = chr, name = "Gene Model")
+# chromosome(grtrack) <- 'chr13'
+# plotTracks(list(itrack, gtrack, atrack, grtrack))
+
+##data track
+ # coords <- c(rep(58205001,145),rep(58205045,145), rep(58209133,145))
+# dat <- c(t(betas_pcdh17dmr)[,1], t(betas_pcdh17dmr)[,2],t(betas_pcdh17dmr)[,3] ) 
+mcols(grObj) <- betas_pcdh17dmr
+ # Dx <- ifelse(dx=="IBS","red","blue")
+dx <- factor(targets$Dx)
+
+dtrack <- DataTrack(grObj,groups = as.vector(dx),type= c("b"),aggregateGroups = TRUE,
+           aggregation = "mean")
+plotTracks(dtrack, groups = as.vector(dx), type= "b", aggregateGroups = TRUE,
+           aggregation = "max")
+plotTracks(list(itrack, gtrack, atrack,dtrack))
+
+
+```
+
+```{r}
+## GNAS DMR
+GNASSigCpgs <- ColDxDMPs_sig_p05[ColDxDMPs_sig_p05$nearestGeneSymbol=="GNAS",]
+GNASSigCpgsPlusStr <- subset(GNASSigCpgs, GNASSigCpgs$strand == "+")
+GNASSigCpgsNegStr <- subset(GNASSigCpgs, GNASSigCpgs$strand == "-")
+
+GNASSigCpgs <- GNASSigCpgsNegStr
+GNASSigCpgs <- GNASSigCpgs[order(GNASSigCpgs$pos),]
+betas_NR4A2dmr <- getBeta(GRsetColFunFltCD)[row.names(getBeta(GRsetColFunFltCD))%in%row.names(GNASSigCpgs),]
+betas_GNASdmr <- betas_Col[row.names(betas_Col)%in%row.names(GNASSigCpgs),]
+dx <- as.factor(pData(GRsetColFunFlt)$Dx)
+grObj <- makeGRangesFromDataFrame(data.frame(chr = GNASSigCpgs$chr, start = GNASSigCpgs$pos, end = GNASSigCpgs$pos+1, strand = GNASSigCpgs$strand, score = GNASSigCpgs$meanDiff))
+
+
+atrack <- AnnotationTrack(grObj, name = "CpG")
+plotTracks(atrack)
+chromosome(atrack) <- 'chr20'
+
+gtrack <- GenomeAxisTrack()
+plotTracks(list(gtrack, atrack))
+
+# genome : "hg19" 
+# gen<-genome(grObj)
+
+gen = "hg19" 
+chr <- as.character(unique(seqnames(grObj)))
+
+# Ideogram track
+itrack <- IdeogramTrack(genome = gen, chromosome = chr)
+plotTracks(list(itrack, gtrack, atrack))
+# geneModels <- data.frame(c(rep("chr20",2)), c(58206655,58205944),c(58303445,58299695),c(96790,93751), c("+","+"),c("protein coding","Nonsense mediated decay"),c("ENSG00000118946" , "ENSG00000118946"),c("ENSG00000118946" , "ENSG00000118946") ,c("ENST00000377918","ENST00000484979"),c("PCDH17","PCDH17"))
+# colnames(geneModels) <- c( "chromosome",    "start",      "end", "width", "strand", "feature","gene",  "exon",      "transcript",     "symbol")
+
+# grtrack <- GeneRegionTrack(geneModels, genome = gen, chromosome = chr, name = "Gene Model")
+# chromosome(grtrack) <- 'chr13'
+# plotTracks(list(itrack, gtrack, atrack, grtrack))
+
+##data track
+ # coords <- c(rep(58205001,145),rep(58205045,145), rep(58209133,145))
+mcols(grObj) <- betas_GNASdmr
+ # Dx <- ifelse(dx=="IBS","red","blue")
+
+dtrack <- DataTrack(grObj,groups = as.vector(dx),type= c("b"),aggregateGroups = TRUE,
+           aggregation = "mean")
+# 
+# plotTracks(dtrack, groups = as.vector(bh), type= "b", aggregateGroups = TRUE,
+#            aggregation = "max")
+plotTracks(list(itrack, gtrack, atrack, dtrack))
+```
+
+######################################################################################
+# BH associated DMPs Colon
+########################################################################################
+
+
+```{r}
+GRsetColFunFltCD <- GRsetColFunFlt[,colnames(GRsetColFunFlt)%in%c(row.names(pData(GRsetColFunFlt)[which(pData(GRsetColFunFlt)$BH == "C"),]), row.names(pData(GRsetColFunFlt)[which(pData(GRsetColFunFlt)$BH=="D"),]))]
+
+# ColBhCDDMP <- dmpFinder(getM(GRsetColFunFltCD),pData(GRsetColFunFltCD)$BH, type = "categorical", qCutoff = 1, shrinkVar = TRUE)
+
+library(minfiData)
+if (require(minfiData)) {
+
+grp <- pData(GRsetColFunFltCD)$BH
+M <- getM(GRsetColFunFltCD)
+B <- getBeta(GRsetColFunFltCD)
+ColBhDMPs <- dmpFinder(M, pheno=grp, type="categorical", shrinkVar = TRUE)
+ColBhDMPs$Bdiff <- rowMeans(B[row.names(ColBhDMPs),colnames(B)%in%row.names(subset(pData(GRsetColFunFltCD), pData(GRsetColFunFltCD)$BH == "C"))])-rowMeans(B[row.names(ColBhDMPs),colnames(B)%in%row.names(subset(pData(GRsetColFunFltCD), pData(GRsetColFunFltCD)$BH == "D"))])
+sum(ColBhDMPs$qval < 0.05, na.rm=TRUE)
+head(ColBhDMPs)
+ann450kSub <- ann450kSub[row.names(ann450kSub)%in%row.names(ColBhDMPs),]
+ann450kSub <- ann450kSub[row.names(ColBhDMPs),]
+ColBhDMPs <- cbind(ColBhDMPs,ann450kSub)
+}
+
+sigColBhDMPsCD <- subset(ColBhDMPs, ColBhDMPs$qval<0.05); dim(sigColBhDMPsCD)
+ColBhDMPsCDp001 <- subset(ColBhDMPs, ColBhDMPs$pval<0.001); dim(ColBhDMPsCDp001)
+```
+
+
+
+```{r}
+ann450kSub <- hm450annotations[match(featureNames(GRsetColFunFlt), hm450annotations$Name),c(1:4,12:19,24:ncol(hm450annotations))] 
+
+
+# factor of interest
+bh <- factor(pData(GRsetColFunFlt)$BH)
+
+# variable to correct for- coupld potenitally correct for age, but leave it out
+
+# use the above to create a design matrix
+design <- model.matrix(~ 0 + bh, data=pData(GRsetColFunFlt))
+colnames(design) <- c("bhC", "bhD", "bhM", "bhN")
+
+# fit the linear model 
+fit <- lmFit(mVals_p, design)
+
+# create a contrast matrix for specific comparisons
+contMatrix <- makeContrasts(bhC-bhN, bhD-bhN,bhM-bhN, bhC-bhD,bhM-bhD, bhM-bhC,levels=design)
+contMatrix
+
+# fit the contrasts
+fit2 <- contrasts.fit(fit, contMatrix)
+fit2 <- eBayes(fit2,trend=TRUE)
+
+# look at the numbers of DM CpGs at FDR < 0.05
+summary(decideTests(fit2))
+#  bhC - bhN bhD - bhN bhM - bhN bhC - bhD bhM - bhD bhM - bhC
+# -1         0         0         0         0         0         0
+# 0     420257    420257    420257    420257    420257    420257
+# 1          0         0         0         0         0         0
+
+# get the table of results for the first contrast 
+DMPs_CN <-  topTable(fit2, num=Inf, coef=1, genelist=ann450kSub)
+DMPs_CN$meanDiff <- rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetColFunFlt), pData(GRsetColFunFlt)$BH ==  "C"))])-rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetColFunFlt), pData(GRsetColFunFlt)$BH ==  "N"))])
+DMPs_CNp001 <- subset(DMPs_CN, DMPs_CN$P.Value<0.001); dim(DMPs_CNp001)
+# [1] 150  33
+
+DMPs_DN <-  topTable(fit2, num=Inf, coef=2, genelist=ann450kSub)
+DMPs_DN$meanDiff <- rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetColFunFlt), pData(GRsetColFunFlt)$BH ==  "D"))])-rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetColFunFlt), pData(GRsetColFunFlt)$BH ==  "N"))])
+DMPs_DNp001 <- subset(DMPs_DN, DMPs_DN$P.Value<0.001); dim(DMPs_DNp001)
+# [1] 229  33
+
+DMPs_MN <-  topTable(fit2, num=Inf, coef=3, genelist=ann450kSub)
+DMPs_MN$meanDiff <- rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetColFunFlt), pData(GRsetColFunFlt)$BH ==  "M"))])-rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetColFunFlt), pData(GRsetColFunFlt)$BH ==  "N"))])
+DMPs_MNp001 <- subset(DMPs_MN, DMPs_MN$P.Value<0.001); dim(DMPs_MNp001)
+# [1] 394  33
+
+DMPs_CD <- topTable(fit2, num=Inf, coef=4, genelist = ann450kSub)
+DMPs_CD$meanDiff <- rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetColFunFlt), pData(GRsetColFunFlt)$BH ==  "C"))])-rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetColFunFlt), pData(GRsetColFunFlt)$BH ==  "D"))])
+DMPs_CD_sig <- subset(DMPs_CD, DMPs_CD$adj.P.Val <0.05); dim(DMPs_CD_sig)
+DMPs_CDp001 <- subset(DMPs_CD, DMPs_CD$P.Value<0.001); dim(DMPs_CDp001)
+DMPs_CDp05 <- subset(DMPs_CD, DMPs_CD$P.Value<0.05); dim(DMPs_CDp05)
+
+GRsetColFunFltCD <- GRsetColFunFlt[,colnames(GRsetColFunFlt)%in%c(row.names(pData(GRsetColFunFlt)[which(pData(GRsetColFunFlt)$BH == "C"),]), row.names(pData(GRsetColFunFlt)[which(pData(GRsetColFunFlt)$BH=="D"),]))]
+
+
+if (require(minfiData)) {
+grp <- pData(GRsetColFunFltCD)$BH
+M <- getM(GRsetColFunFltCD)
+dmpCD <- dmpFinder(M, pheno=grp, type="categorical", shrinkVar = TRUE)
+sum(dmpCD$qval < 0.05, na.rm=TRUE)
+head(dmpCD)
+
+}
+```
+
+```{r setup}
+# Set working directory outside the chunks
+knitr::opts_knit$set(root.dir = normalizePath("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/"))
+```
+
+# DMRs
+
+```{r}
+# C and D only
+
+# targets <- pData(GRsetColFunFltCD)
+bh <- factor(pData(GRsetColFunFltCD)$BH)
+design <- model.matrix(~0+bh, data=pData(GRsetColFunFltCD))
+colnames(design) <- levels(bh)
+contMatrix <- makeContrasts(C-D, levels=design)
+contMatrix
+myAnnotation <- cpg.annotate(object = getM(GRsetColFunFltCD), datatype = "array", what = "M", analysis.type = "differential", design = design, contrasts = TRUE, cont.matrix = contMatrix, coef = "C - D", arraytype = "450K")
+
+str(myAnnotation)
+# List of 7
+#  $ ID    : Factor w/ 420257 levels "cg00000029","cg00000108",..: 222425 374552 248925 18571 277135 194037 362374 266425 100898 55258 ...
+#  $ stat  : num [1:420257] 1.061 -1.581 -0.528 -0.93 -1.755 ...
+#  $ CHR   : Factor w/ 22 levels "chr1","chr10",..: 1 1 1 1 1 1 1 1 1 1 ...
+#  $ pos   : int [1:420257] 15865 534242 710097 714177 720865 758829 763119 779995 805102 805338 ...
+#  $ betafc: num [1:420257] 0.007359 -0.011576 -0.003847 -0.000521 -0.004631 ...
+#  $ indfdr: num [1:420257] 1 1 1 1 1 ...
+#  $ is.sig: logi [1:420257] FALSE FALSE FALSE FALSE FALSE FALSE ...
+#  - attr(*, "row.names")= int [1:420257] 1 2 3 4 5 6 7 8 9 10 ...
+#  - attr(*, "class")= chr "annot"
+
+DMRs <- dmrcate(myAnnotation, lambda=1000, C=2, pcutoff = 0.001)
+head(DMRs$results); dim(DMRs$results)
+DMRsInt<- DMRs$results[order(-DMRs$results$no.cpgs),]
+
+# convert the regions to annotated genomic ranges
+# data(dmrcatedata)
+results.ranges <- extractRanges(DMRs, genome = "hg19")
+results.ranges.sort<- data.frame(results.ranges)[order(-data.frame(results.ranges)$no.cpgs),]
+# # set up the grouping variables and colours
+# pal <- brewer.pal(3,"Dark2")
+# groups <- pal[1:length(unique(targets$Dx))]
+# names(groups) <- levels(factor(targets$Dx))
+# cols <- groups[as.character(factor(targets$Dx))]
+# samps <- 1:nrow(targets)
+# 
+# # draw the plot for the top DMR
+# png("temp/functional_norm/methBioconductorWorkflow/Col/ColDxDMR1_STC1.png", height = 2000, width = 2000, res = 250)
+# DMR.plot(ranges=results.ranges, dmr=1, CpGs=getBeta(GRsetColFunFlt), phen.col=cols, what = "Beta",      arraytype = "450K", pch=16, toscale=FALSE, plotmedians=TRUE,   genome="hg19", samps=samps)
+# dev.off()
+
+```
+
+```{r}
+## NR4A2 DMR
+NR4A2SigCpgs <- DMPs_CDp05[DMPs_CDp05$UCSC_RefGene_Name =="NR4A2",]
+NR4A2SigCpgsPlusStr <- subset(NR4A2SigCpgs, NR4A2SigCpgs$strand == "+")
+NR4A2SigCpgsNegStr <- subset(NR4A2SigCpgs, NR4A2SigCpgs$strand == "-")
+
+NR4A2SigCpgs <- NR4A2SigCpgsNegStr
+NR4A2SigCpgs <- NR4A2SigCpgs[order(NR4A2SigCpgs$pos),]
+betas_NR4A2dmr <- getBeta(GRsetColFunFltCD)[row.names(getBeta(GRsetColFunFltCD))%in%row.names(NR4A2SigCpgs),]
+bh <- as.factor(pData(GRsetColFunFltCD)$BH)
+betas_NR4A2dmr <- betas_NR4A2dmr[row.names(NR4A2SigCpgs),]
+grObj <- makeGRangesFromDataFrame(data.frame(chr = NR4A2SigCpgs$chr, start = NR4A2SigCpgs$pos, end = NR4A2SigCpgs$pos+1, strand = NR4A2SigCpgs$strand, score = NR4A2SigCpgs$meanDiff))
+
+
+atrack <- AnnotationTrack(grObj, name = "CpG")
+plotTracks(atrack)
+chromosome(atrack) <- 'chr2'
+
+gtrack <- GenomeAxisTrack()
+plotTracks(list(gtrack, atrack))
+
+# genome : "hg19" 
+# gen<-genome(grObj)
+
+gen = "hg19" 
+chr <- as.character(unique(seqnames(grObj)))
+
+# Ideogram track
+itrack <- IdeogramTrack(genome = gen, chromosome = chr)
+plotTracks(list(itrack, gtrack, atrack))
+# geneModels <- data.frame(c(rep("chr20",2)), c(58206655,58205944),c(58303445,58299695),c(96790,93751), c("+","+"),c("protein coding","Nonsense mediated decay"),c("ENSG00000118946" , "ENSG00000118946"),c("ENSG00000118946" , "ENSG00000118946") ,c("ENST00000377918","ENST00000484979"),c("PCDH17","PCDH17"))
+# colnames(geneModels) <- c( "chromosome",    "start",      "end", "width", "strand", "feature","gene",  "exon",      "transcript",     "symbol")
+
+# grtrack <- GeneRegionTrack(geneModels, genome = gen, chromosome = chr, name = "Gene Model")
+# chromosome(grtrack) <- 'chr13'
+# plotTracks(list(itrack, gtrack, atrack, grtrack))
+
+##data track
+ # coords <- c(rep(58205001,145),rep(58205045,145), rep(58209133,145))
+mcols(grObj) <- betas_NR4A2dmr
+ bhCol <- ifelse(bh=="C","red","green")
+dtrack <- DataTrack(grObj,groups = as.vector(bh),type= c("b"),aggregateGroups = TRUE,
+           aggregation = "mean")
+# 
+# plotTracks(dtrack, groups = as.vector(bh), type= "b", aggregateGroups = TRUE,
+#            aggregation = "max")
+plotTracks(list(itrack, gtrack, atrack, dtrack))
+```
+
+```{r}
+## HOXA5/6 DMR
+HOXA5SigCpgs <- DMPs_CDp05[DMPs_CDp05$UCSC_RefGene_Name =="HOXA5",]
+HOXA5SigCpgsPlusStr <- subset(HOXA5SigCpgs, HOXA5SigCpgs$strand == "+")
+HOXA5SigCpgsNegStr <- subset(HOXA5SigCpgs, HOXA5SigCpgs$strand == "-")
+
+HOXA5SigCpgs <- HOXA5SigCpgsPlusStr
+HOXA5SigCpgs <- HOXA5SigCpgs[order(HOXA5SigCpgs$pos),]
+betas_HOXA5dmr <- getBeta(GRsetColFunFltCD)[row.names(getBeta(GRsetColFunFltCD))%in%row.names(HOXA5SigCpgs),]
+bh <- as.factor(pData(GRsetColFunFltCD)$BH)
+grObj <- makeGRangesFromDataFrame(data.frame(chr = HOXA5SigCpgs$chr, start = HOXA5SigCpgs$pos, end = HOXA5SigCpgs$pos+1, strand = HOXA5SigCpgs$strand, score = HOXA5SigCpgs$meanDiff))
+
+
+atrack <- AnnotationTrack(grObj, name = "CpG")
+plotTracks(atrack)
+chromosome(atrack) <- 'chr7'
+
+gtrack <- GenomeAxisTrack()
+plotTracks(list(gtrack, atrack))
+
+# genome : "hg19" 
+# gen<-genome(grObj)
+
+gen = "hg19" 
+chr <- as.character(unique(seqnames(grObj)))
+
+# Ideogram track
+itrack <- IdeogramTrack(genome = gen, chromosome = chr)
+plotTracks(list(itrack, gtrack, atrack))
+# geneModels <- data.frame(c(rep("chr20",2)), c(58206655,58205944),c(58303445,58299695),c(96790,93751), c("+","+"),c("protein coding","Nonsense mediated decay"),c("ENSG00000118946" , "ENSG00000118946"),c("ENSG00000118946" , "ENSG00000118946") ,c("ENST00000377918","ENST00000484979"),c("PCDH17","PCDH17"))
+# colnames(geneModels) <- c( "chromosome",    "start",      "end", "width", "strand", "feature","gene",  "exon",      "transcript",     "symbol")
+
+# grtrack <- GeneRegionTrack(geneModels, genome = gen, chromosome = chr, name = "Gene Model")
+# chromosome(grtrack) <- 'chr13'
+# plotTracks(list(itrack, gtrack, atrack, grtrack))
+
+##data track
+ # coords <- c(rep(58205001,145),rep(58205045,145), rep(58209133,145))
+
+mcols(grObj) <- betas_HOXA5dmr
+dtrack <- DataTrack(grObj,groups = as.vector(bh),type= c("b"),aggregateGroups = TRUE,
+           aggregation = "mean")
+# 
+# plotTracks(dtrack, groups = as.vector(bh), type= "b", aggregateGroups = TRUE,
+#            aggregation = "max")
+plotTracks(list(itrack, gtrack, atrack, dtrack))
+```
+
+```{r setup}
+# Set working directory outside the chunks
+knitr::opts_knit$set(root.dir = normalizePath("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/"))
+```
+
+# Heatmap and boxplot
+```{r}
+# heatmap
+png("temp/functional_norm/methBioconductorWorkflow/Colon/ColDxp001heatmap.png", height = 2000, width = 2000, res = 250)
+heatmapMeth(GRsetColFunFlt, row.names(ColDxDMPs_sig_p001), pData(GRsetColFunFlt)$Dx, pData(GRsetColFunFlt)$BH, pData(GRsetColFunFlt)$Gender)
+dev.off()
+
+# box plots
+library(ggplot2)
+# plot the top 4 most significantly differentially methylated CpGs 
+ColDxDMPs_sig_p001 <- ColDxDMPs_sig_p001[order(-ColDxDMPs_sig_p001$meanDiff),]
+dmp <- 1:16
+df <- cbind(as.data.frame(t(getBeta(GRsetColFunFlt)[row.names(GRsetColFunFlt)%in%rownames(ColDxDMPs_sig_p001)[dmp],])), pData(GRsetColFunFlt)$BH, pData(GRsetColFunFlt)$Dx) 
+
+colnames(df)[-c(dim(df)[2],dim(df)[2]-1)] <- ColDxDMPs_sig_p001[dmp,][,26]
+colnames(df)[which(duplicated(colnames(df)))] <- paste(colnames(df)[which(duplicated(colnames(df)))],"_1",sep="")
+colnames(df)[dim(df)[2]] <- "Dx"
+colnames(df)[dim(df)[2]-1] <- "BH"
+colnames(df) <- gsub("-","_",colnames(df))
+
+library(gridExtra)   
+png("temp/functional_norm/methBioconductorWorkflow/Colon/Col_Dx001p_dmp1_16.png", height = 3000, width  =3000,res =250)
+
+plots = NULL
+for (cpg in colnames(df)[-c(dim(df)[2],dim(df)[2]-1)]) {
+        plots[[cpg]] = ggplot(df, aes_string("Dx", cpg)) + geom_boxplot(outlier.shape = NA) + geom_jitter(aes(color = df$BH))
+        }
+
+grid.arrange(plots[[1]],plots[[2]],plots[[3]],plots[[4]],
+             plots[[5]],plots[[6]],plots[[7]],plots[[8]],
+             plots[[9]],plots[[10]],plots[[11]],plots[[12]],
+             plots[[13]],plots[[14]],plots[[15]],plots[[16]],
+            ncol = 4)
+dev.off()
+```
+# Dx Gender and interaction assocaiated DMPs
+```{r}
+# Dx Gender interaction
+pData(GRsetColFunFlt)$ibsGenInt <- interaction(pData(GRsetColFunFlt)$Dx,pData(GRsetColFunFlt)$Gender)
+pData(GRsetColFunFlt)$ibsGenInt <- gsub("\\.","_", pData(GRsetColFunFlt)$ibsGenInt)
+dmpsIntCol <- DMPsInt(GRsetColFunFlt,factor(pData(GRsetColFunFlt)$ibsGenInt), ann450kSub)
+
+mVals_p <- getM(GRsetColFunFlt)
+head(mVals_p[,1:5])
+betaVals_p <- getBeta(GRsetColFunFlt)
+head(betaVals_p[,1:5])
+
+# factor of interest
+Dx <- factor(pData(GRsetColFunFlt)$Dx)
+Gender <- factor(pData(GRsetColFunFlt)$Gender)
+
+# variable to correct for- coupld potenitally correct for age, but leave it out
+
+# use the above to create a design matrix
+design <- model.matrix(~ 0 + Dx:Gender, data=pData(GRsetColFunFlt))
+colnames(design) <- c("HC_F", "IBS_F", "HC_M", "IBS_M")
+
+# fit the linear model 
+fit <- lmFit(mVals_p, design)
+
+# create a contrast matrix for specific comparisons
+contMatrix <- makeContrasts(IBS_M-HC_M, IBS_F-HC_F,IBS_M-IBS_F, HC_M-HC_F,   levels=design)
+contMatrix
+
+# fit the contrasts
+fit2 <- contrasts.fit(fit, contMatrix)
+fit2 <- eBayes(fit2)
+
+# look at the numbers of DM CpGs at FDR < 0.05
+summary(decideTests(fit2))
+# 
+#   IBS_M - HC_M IBS_F - HC_F IBS_M - IBS_F HC_M - HC_F
+# -1            0            0           381         202
+# 0        420257       420257        419626      420002
+# 1             0            0           250          53
+
+# get the table of results for the first contrast (naive - rTreg)
+ann450kSub <- hm450annotations[match(rownames(mVals_p),hm450annotations$Name),
+                      c(1:4,12:19,24:ncol(hm450annotations))]
+DMPs_IBS_M_HC_M <-  topTable(fit2, num=Inf, coef=1, genelist=ann450kSub)
+DMPs_IBS_M_HC_M$meanDiff <- rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetColFunFlt), pData(GRsetColFunFlt)$ibsGenInt ==  "IBS_M"))])-rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetColFunFlt), pData(GRsetColFunFlt)$ibsGenInt ==  "HC_M"))])
+
+DMPs_IBS_F_HC_F <-  topTable(fit2, num=Inf, coef=2, genelist=ann450kSub)
+DMPs_IBS_F_HC_F$meanDiff <- rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetColFunFlt), pData(GRsetColFunFlt)$ibsGenInt ==  "IBS_F"))])-rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetColFunFlt), pData(GRsetColFunFlt)$ibsGenInt ==  "HC_F"))])
+
+DMPs_IBS_M_IBS_F <-  topTable(fit2, num=Inf, coef=3, genelist=ann450kSub)
+DMPs_IBS_M_IBS_F$meanDiff <- rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetColFunFlt), pData(GRsetColFunFlt)$ibsGenInt ==  "IBS_M"))])-rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetColFunFlt), pData(GRsetColFunFlt)$ibsGenInt ==  "IBS_F"))])
+
+DMPs_HC_M_HC_F <- topTable(fit2, num=Inf, coef=4, genelist=ann450kSub)
+DMPs_HC_M_HC_F$meanDiff <- rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetColFunFlt), pData(GRsetColFunFlt)$ibsGenInt ==  "HC_M"))])-rowMeans(betaVals_p[,colnames(betaVals_p)%in%row.names(subset(pData(GRsetColFunFlt), pData(GRsetColFunFlt)$ibsGenInt ==  "HC_F"))])
+
+# remove HC Gender probes from IBS
+DMPs_IBS_M_IBS_F_sig <- subset(DMPs_IBS_M_IBS_F, DMPs_IBS_M_IBS_F$adj.P.Val<0.05); dim(DMPs_IBS_M_IBS_F_sig)
+# [1] 631    33
+
+DMPs_HC_M_HC_F_sig <- subset(DMPs_HC_M_HC_F, DMPs_HC_M_HC_F$adj.P.Val<0.05); dim(DMPs_HC_M_HC_F_sig)
+# [1] 255  33
+
+DMPs_HC_M_HC_F_sig <- subset(DMPs_HC_M_HC_F, DMPs_HC_M_HC_F$P.Value<0.05); dim(DMPs_HC_M_HC_F_sig)
+# [1] 48568    33
+
+
+DMPs_IBS_M_IBS_F_sig1 <- DMPs_IBS_M_IBS_F_sig[!row.names(DMPs_IBS_M_IBS_F_sig)%in%row.names(DMPs_HC_M_HC_F_sig),]; dim(DMPs_IBS_M_IBS_F_sig1)
+
+# [1] 224  33
+```
+
+```{r}
+
+library(minfiData)
+if (require(minfiData)) {
+
+grp <- pData(GRsetColFunFlt)$Gender
+M <- getM(GRsetColFunFlt)
+B <- getBeta(GRsetColFunFlt)
+ColSexDMPs <- dmpFinder(M, pheno=grp, type="categorical", shrinkVar = TRUE)
+ColSexDMPs$Bdiff <- rowMeans(B[row.names(ColSexDMPs),colnames(B)%in%row.names(subset(pData(GRsetColFunFlt), pData(GRsetColFunFlt)$Gender == "F"))])-rowMeans(B[row.names(ColSexDMPs),colnames(B)%in%row.names(subset(pData(GRsetColFunFlt), pData(GRsetColFunFlt)$Gender == "M"))])
+sum(ColSexDMPs$qval < 0.05, na.rm=TRUE)
+head(ColSexDMPs)
+ann450kSub <- ann450kSub[row.names(ann450kSub)%in%row.names(ColSexDMPs),]
+ann450kSub <- ann450kSub[row.names(ColSexDMPs),]
+ColSexDMPs <- cbind(ColSexDMPs,ann450kSub)
+}
+
+sigColSexDMPs <- subset(ColSexDMPs, ColSexDMPs$qval<0.05); dim(sigColSexDMPs)
+ColBhDMPsCDp001 <- subset(ColBhDMPs, ColBhDMPs$pval<0.001); dim(ColBhDMPsCDp001)
+
+
+# ColGenderDMPs <- DMPs(GRsetColFunFlt,factor(pData(GRsetColFunFlt)$Gender), ann450kSub)
+# ColGenderDMPs_sig <- subset(ColGenderDMPs, ColGenderDMPs$adj.P.Val<0.05); dim(ColGenderDMPs_sig)
+# # [1] 2278   33
+```
+
+```{r}
+DMPs_IBS_M_IBS_F_sig2 <- DMPs_IBS_M_IBS_F_sig1[!row.names(DMPs_IBS_M_IBS_F_sig1)%in%row.names(ColGenderDMPs_sig),]; dim(DMPs_IBS_M_IBS_F_sig2)
+# [1] 28    33
+
+DMPs_IBS_M_IBS_F_sig3 <- subset(DMPs_IBS_M_IBS_F_sig2, DMPs_IBS_M_IBS_F_sig2$adj.P.Val<0.01);dim(DMPs_IBS_M_IBS_F_sig3)
+# [1] 0   33
+
+# DMPs_IBS_M_IBS_F_sig3 <- subset(DMPs_IBS_M_IBS_F_sig2, DMPs_IBS_M_IBS_F_sig2$meanDiff>=0.02|DMPs_IBS_M_IBS_F_sig2$meanDiff< -0.02); dim(DMPs_IBS_M_IBS_F_sig3)
+# 
+# save(DMPs_IBS_M_IBS_F_sig2, file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/Colon/DMPs_IBS_M_IBS_F_sig2.rda")
+# 
+# write.csv(DMPs_IBS_M_IBS_F_sig3, file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/Colon/DMPs_IBS_M_IBS_F_sig2_28.csv")
+
+```
+
+```{r}
+## same results from making an interaction variable.
+
+
+
+dmpsIntCol <- read.csv("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/Colon/dmpsIntCol.csv", row.names = 4)
+
+ibs_m_f_sig <- subset(dmpsIntCol[[3]], dmpsIntCol[[3]]$adj.P.Val<0.05); dim(ibs_m_f_sig)
+# [1] 40280    33
+hc_m_f_sig <- subset(dmpsIntCol[[4]], dmpsIntCol[[4]]$adj.P.Val<0.05); dim(hc_m_f_sig)
+# # [1] 453  33 
+ibs_m_f_sig1 <- ibs_m_f_sig[!row.names(ibs_m_f_sig)%in%row.names(hc_m_f_sig),]; dim(ibs_m_f_sig1)
+# # [1] 39990    33
+
+## very few gender differences in HC compared to IBS.use p value instead to remove as many gender assocaited probes as possible.
+hc_m_f_sig <- subset(dmpsIntCol[[4]], dmpsIntCol[[4]]$P.Value<0.05); dim(hc_m_f_sig)
+# [1] 30448    33
+ibs_m_f_sig1 <- ibs_m_f_sig[!row.names(ibs_m_f_sig)%in%row.names(hc_m_f_sig),]; dim(ibs_m_f_sig1)
+# [1] 37363    33
+
+# IBS HC differences within 1. Women 2. men
+f_ibs_hc_sig <- subset(dmpsIntCol[[1]], dmpsIntCol[[1]]$adj.P.Val<0.05); dim(f_ibs_hc_sig)
+# [1]  2 33
+m_ibs_hc_sig<- subset(dmpsIntCol[[2]], dmpsIntCol[[2]]$adj.P.Val<0.05); dim(m_ibs_hc_sig)
+# [1] 15 33
+
+## try to remove general gender differences
+ibs_m_f_sig2 <- ibs_m_f_sig[!row.names(ibs_m_f_sig)%in%row.names(ColGenderDMPs_sig),]; dim(ibs_m_f_sig2)
+# [1] 31759    33 
+ibs_m_f_sig3 <- ibs_m_f_sig2[!row.names(ibs_m_f_sig2)%in%row.names(hc_m_f_sig),]; dim(ibs_m_f_sig3)
+# [1] 30821    33 ### final
+
+ibs_m_f_sig3fdr01 <- subset(ibs_m_f_sig3, ibs_m_f_sig3$adj.P.Val<0.01); dim(ibs_m_f_sig3fdr01)
+# [1] 5788   33
+
+# ibs_m_f_sig3fdr01md <- subset(ibs_m_f_sig3fdr01, ibs_m_f_sig3fdr01$meanDiff >0.3 | ibs_m_f_sig3fdr01$meanDiff < -0.3); dim(ibs_m_f_sig3fdr01md )
+
+```
+
+```{r setup}
+# Set working directory outside the chunks
+knitr::opts_knit$set(root.dir = normalizePath("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/"))
+```
+
+```{r}
+#################### save the results
+
+write.table(ColDxDMPs, file="temp/functional_norm/methBioconductorWorkflow/colon/colonDxDMPs.csv", sep=",", row.names=FALSE)
+
+write.table(ColDxDMPs_sig_p001, file="temp/functional_norm/methBioconductorWorkflow/colon/colonDxDMPs_sig_p001.csv", sep=",", row.names=FALSE)
+
+write.table(ColGenderDMPs, file="temp/functional_norm/methBioconductorWorkflow/colon/colonGenderDMPs.csv", sep=",", row.names=FALSE)
+
+write.table(dmpsIntCol, file = "temp/functional_norm/methBioconductorWorkflow/colon/dmpsIntcolon.csv", sep=",", row.names=FALSE)
+
+write.table(f_ibs_hc_sig, file="temp/functional_norm/methBioconductorWorkflow/colon/colon_f_ibs_hc_sig.csv", sep=",", row.names=FALSE)
+
+write.table(m_ibs_hc_sig, file="temp/functional_norm/methBioconductorWorkflow/colon/colon_m_ibs_hc_sig.csv", sep=",", row.names=FALSE)
+
+write.table(ibs_m_f_sig2, file="temp/functional_norm/methBioconductorWorkflow/colon/colon_ibs_m_f_sig2.csv", sep=",", row.names=FALSE)
+
+# write.table(ibs_m_f_sig3, file="temp/functional_norm/methBioconductorWorkflow/colon/colon_ibs_m_f_sig_final.csv", sep=",", row.names=FALSE)
+
+write.table(ColGenderDMPs_sig, file="temp/functional_norm/methBioconductorWorkflow/colon/colonGenderDMPs_sig.csv", sep=",", row.names=FALSE)
+
+write.table(ColDxDMPs_sig_p05, file="temp/functional_norm/methBioconductorWorkflow/colon/colonDxDMPs_sig_p05.csv", sep=",", row.names=FALSE)
+
+
+save(dmpsIntCol , file = "temp/functional_norm/methBioconductorWorkflow/colon/colon_dmpsIntCol.rda")
+```

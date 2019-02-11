@@ -1,0 +1,413 @@
+---
+title: "Methylation_known_pathway_genes"
+author: "Swapna Mahurkar-Joshi"
+date: "July 11, 2017"
+output: html_document
+---
+
+```{r setup}
+# Set working directory outside the chunks
+knitr::opts_knit$set(root.dir = normalizePath("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/methylation_known_genes/"))
+```
+
+```{r, echo=FALSE, message = FALSE}
+library (wordcloud)
+library (tm)
+library (RISmed)
+library (cluster)  
+```
+
+# library for reading abstracts
+
+```{r, message = FALSE, echo = FALSE}
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/data1/consistant_data/pbmc_meth_level4.rda")
+pbmcDxDMPs <- read.csv("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/res3_functional_norm/methBioconductorWorkflow/pbmc/pbmcDxDMPs.csv")
+library(RISmed)
+library(pubmed.mineR)
+```
+
+# Getting the list of stress-related genes
+
+```{r}
+stressGenes2 <- c("SLC6A4", "SLC6A3","BDNF", "NR3C1", "CNR1","DRD4", "DRD1","DRD3", "MMP9", "HTR2C", "DIO2", "FKBP5", "CRHR1", "CRHR2", "EGR2","CYP11A1", "CRH", "EGR4", "NTF4", "ARC", "CYP17A1", "POU1F1", "AKR1D1","HSD3B2", "PROP1","HTR1B","HTR2A","POMC","CYP11B1","PRKAR1A","MC2R",
+"LEPR","TBX19","NR3C2","PROP1","CRHR2","LEP","AVPR1A","MC4R","AVP","HSD11B1","H6PD","SRD5A1","DHRS9","CYP3A4","SERPINA6","ACE", "NPSR1", "ESR1", "GABRA6", "PER3","ADCYAP1R1","NR3C1","FKBP4","FKBP5","BDNF","NR3C2","HTR2C","BDNF","HTR1B","CRHR1","CRHR2","CRHBP","AVP","POMC","MC2R","HSD11B1","HSD11B2","CNR1", "DRD2","AKT1","AKT3","COMT","DISC1","PDE4A","KDM1A","CRHBP","NRG1","TCF4","CDH13","FYN", "TPH1","TPH2","NOS1", "NOS3","AR","ABCG1","OXTR","AVPR1B","MAOA", "FKBP5", "CDH5", "ADCYAP1R1",  "DBH", "FAAH", "NPY", "NTRK2", "PCLO","EGR1", "IL8", "STMN1","IL18", "NR4A1", "HTR1A", "TRPV1", "TRPV4","NR5A1","HDAC4")
+length(unique(stressGenes2))
+```
+
+```{r}
+ann450kSub <- pbmc_meth_level4[["ann450kSub"]]
+x <- strsplit(ann450kSub$UCSC_RefGene_Name, ";")
+n <- max(sapply(x, length))
+l <- lapply(x, function(X) c(X, rep(' ', n - length(X))))
+ann450kSub$UCSC_RefGene_Name1 <- data.frame(t(do.call(cbind, l)))[,1]
+```
+
+# Test if the stress related genes are differentially methylated
+
+```{r}
+# no of CpGs tested
+stressGenesCpg <- ann450kSub[ ann450kSub$UCSC_RefGene_Name1%in%stressGenes2,]; dim(stressGenesCpg)
+# 2108   27
+
+betas_stress <- pbmc_meth_level4[["pbmc_betas"]][row.names(pbmc_meth_level4[["pbmc_betas"]])%in%row.names(stressGenesCpg),];dim(betas_stress)
+
+stress_dm <- pbmcDxDMPs[row.names(pbmcDxDMPs) %in% row.names(stressGenesCpg),];dim(stress_dm)
+stress_dm <- as.data.frame(stress_dm)
+
+
+x <- strsplit(as.character(stress_dm$UCSC_RefGene_Name), ";")
+n <- max(sapply(x, length))
+l <- lapply(x, function(X) c(X, rep(' ', n - length(X))))
+stress_dm$Gene.Symbol <- data.frame(t(do.call(cbind, l)))[,1]
+
+
+write.csv(stress_dm, file = "stress_dm_pbmc_2108.csv")
+nam1 <- read.csv("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/temp1/methylation_known_genes/gene_names_pubmedids.csv")
+nam1 <- nam1[nam1$Gene.Symbol%in%stressGenes2,]
+nam2 <- merge(stress_dm, nam1, by = "Gene.Symbol", all = TRUE)
+
+nam3 <- nam2[nam2$Gene.Symbol%in%stress_dm$Gene.Symbol,]
+nam3 <- nam3[!duplicated(nam3$Name),]
+write.csv(nam3, file = "pubmedid_gene_pval_pbmc_stressAll.csv")
+```
+
+```{r }
+row.names(pbmcDxDMPs) <- pbmcDxDMPs[,4]
+pbmc.sig <- subset(pbmcDxDMPs, pbmcDxDMPs$P.Value <0.05); dim(pbmc.sig)
+```
+
+### hypergeometric test
+
+```{r}
+stressMethDxPbmc <- pbmc.sig[row.names(pbmc.sig)%in%row.names(stressGenesCpg),]
+dim(stressMethDxPbmc); 
+#[1] 88 33
+
+dim(Pbmc.sig)
+# [1] 13617    33
+
+fisher.test(matrix(c(88,2108,13617, 420257),byrow = TRUE,nrow =2, ncol =2) )
+dhyper(88, 2108, 418149, 13617)
+1-phyper(73, 1708, 418549, 13617, lower.tail = TRUE)
+```
+
+# Plot Hypergeometric Distribution
+
+```{r}
+n <- 88
+k <- seq(0, n, by = 10)
+plot (k, dbinom(k, n, pi/10, log = TRUE), type = "l", ylab = "log density",
+      main = "dbinom(*, log=TRUE) is better than  log(dbinom(*))")
+library(clttools)
+hyper.simu.plot(88, 2108, 418149, 13617, times=1000, ylim = NULL, qqplot = FALSE)
+write.csv(stressMethDxPbmc, file = "stressMethDxPbmc.csv")
+
+```
+
+# Load metadata and include life events survey
+```{r}
+metDat_p <- pbmc_meth_level4[["metDat_p"]]; dim(metDat_p)
+
+lifeEvents <- read.csv("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/data1/raw_data/life_event_survey.csv", row.names = 1)
+lifeEvents1 <- lifeEvents[row.names(lifeEvents)%in%row.names(metDat_p),]; dim(lifeEvents1)
+
+metDat_p1 <- as.data.frame(merge (metDat_p, lifeEvents, by = "row.names", all.x = TRUE)); row.names(metDat_p1) <- metDat_p1[,1]
+metDat_p1 <- metDat_p1[row.names(metDat_p),]
+all.equal(row.names(metDat_p),row.names(metDat_p1))
+metDat_p <- metDat_p1
+rm(metDat_p1)
+metDat_p$Row.names <- NULL
+metDat_p$Age[41] <- 31
+```
+
+```{r}
+betas_Pbmc2 <- betas_stress[row.names(betas_stress)%in%row.names(stressMethDxPbmc),]; dim(betas_Pbmc2)
+betas_Pbmc2 <-  t(betas_Pbmc2[row.names(stressMethDxPbmc),]); dim(betas_Pbmc2)
+all.equal(colnames(betas_Pbmc2), row.names(stressMethDxPbmc))
+
+colnames(betas_Pbmc2) <- paste(colnames(betas_Pbmc2),stressMethDxPbmc$nearestGeneSymbol, sep = "_")
+# row.names(beta.Pbmc.stress1) <- substr(row.names((beta.Pbmc.stress)),1,5)
+
+all.equal(row.names(metDat_p),row.names(betas_Pbmc2))
+
+metDat_p$BH <- ifelse(metDat_p$BH_Blood_Collection=="C",1,ifelse(metDat_p$BH_Blood_Collection=="D",2,ifelse(metDat_p$BH_Blood_Collection=="M",6,4)))
+
+data1<-as.data.frame(cbind(betas_Pbmc2,metDat_p[,-c(1,3,22,23,24,26,28)])); dim(data1)
+data1.ibs <- subset(data1, data1$Group==2)
+data1.ibs$Group<- NULL
+data1.hc <- subset(data1, data1$Group==1)
+data1.hc$Group <-  NULL
+data1$Group <-  NULL
+```
+
+# Correlation IBS  and HC together
+
+```{r}
+library(Hmisc)
+cor1       <- rcorr(as.matrix(data1), type="spearman")
+datCor     <- cor1$r; dim(datCor)
+datP       <- as.data.frame(cor1$P); dim(datP)
+corInt     <- datP[1:88,89:112]
+adjPvalues <- as.data.frame(apply(corInt,2,p.adjust))
+intCorDf   <- adjPvalues[which(adjPvalues<0.1, arr.ind = TRUE),]; dim(intCorDf )
+intCorDf1  <- intCorDf[as.vector(which(rowSums(intCorDf)<23.1)),as.vector(which(colSums(intCorDf)<33.1))]
+# ACE no significance
+# VSI no significance
+# intCorDf2  <- intCorDf1[ c(2:6,8:12,25), c(1,2,4,5,7)]
+intCorDf2  <- intCorDf1[c(1,8,9,10,11,12,17), c(3,4,5,8,11)]
+clinDatInt <- data1[,colnames(data1)%in%colnames(intCorDf2)]; dim(clinDatInt)
+geneDatInt <- data1[,colnames(data1)%in%row.names(intCorDf2)]; dim(geneDatInt)
+data2 <- cbind(geneDatInt,clinDatInt)
+colnames(data2)[c(6,7,9)] <- c("Abdominal Pain", "Bloating","PHQ_15")
+data2$Neg_Events_Count  <- data1$Neg_Events_Count
+data2$cg13504245_NTRK2  <- data1$cg13504245_NTRK2
+
+# for correlation values
+
+```
+
+```{r, message = FALSE, echo=FALSE}
+library(mixOmics)
+color<-color.jet
+par(mfrow = c(1,2));
+png("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/Methyl_paper_1_2_2018/mixOmics_stress_genes_pbmc_sig.png", height=1700, width=1700, res=300)
+stress_pheno <- imgCor(geneDatInt,clinDatInt, X.var.names = TRUE,
+                       Y.var.names = TRUE,
+                       sideColors = TRUE,
+                       interactive.dev = TRUE,
+                        # main = TRUE,
+                       row.cex= 1.0, col.cex=1.0)
+# color,symkey, keysize,
+# xlab, ylab, margins, lhei, lwid)
+dev.off()
+```
+
+```{r}
+data2$Group <- as.factor(metDat_p$Group)
+setwd("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/Methyl_paper_1_2_2018/pbmc_plots/"); 
+for (i in 1:5) { 
+  for (j in 6:10)
+    local( {
+      y <- data2[, i]
+      x <- data2[, j]
+      g <- ggplot(data2, aes(x=x, y=y)) + geom_point(aes(color = data2$Group)) + geom_smooth(method = "lm", se = FALSE)+ labs(x = colnames(data2)[j], y = colnames(data2)[i]) +  theme(axis.text=element_text(size=11))+ theme(legend.position="none") #+ geom_text(aes(label = paste(" p = ", pvalueformatted), x =1.5, y = max(y, na.rm = TRUE)+ (max(y, na.rm = TRUE))/5) ,  na.rm=TRUE)
+  print(i)
+    ggsave(g, file = paste(colnames(data2)[i],paste(colnames(data2)[j], ".png", sep = ""),sep = "_"), height =  3, width = 3, units = "in")
+    })
+}
+```
+```{r}
+# install.packages("corrplot")
+data2$Neg_Events_Count <- NULL
+data2$cg13504245_NTRK2 <- NULL
+library(corrplot)
+library(RColorBrewer)
+source("http://www.sthda.com/upload/rquery_cormat.r")
+data2$Bloating <- as.numeric(as.character(data2$Bloating))
+# data2$ETI_General_Score <- as.numeric(as.character(data2$ETI_General_Score))
+data2$Group <- NULL
+M <-cor(data2, method = 'spearman', use = "pairwise.complete.obs")
+corrplot(M, type="upper", order="hclust",tl.cex=0.8,
+         col=brewer.pal(n=8, name="RdYlBu"))
+```
+
+# add important genes such as glucocorticoid and current life stress
+
+```{r}
+data2$cg10847032_NR3C1  <- data1$cg10847032_NR3C1
+data2$IBS_Severity      <- data1$IBSSS_Severity
+data2$Neg_Events_Count  <- data1$Neg_Events_Count
+data2$Neg_Events_Impact <- data1$Neg_Events_Impact
+data2$Total_Impact      <- data1$Total_Impact
+data2$cg13504245_NTRK2  <- data1$cg13504245_NTRK2
+data2$cg18595639_H6PD   <- data1$cg18595639_H6PD
+data2 <-  data2[,c(1:6,12,17:18,7:11,13:16)]
+```
+
+# NR3C1 and SSPO in IBS
+
+```{r}
+Pbmc.sig[Pbmc.sig$nearestGeneSymbol%in%"NR3C1", ]
+Pbmc.sig[Pbmc.sig$nearestGeneSymbol%in%"SSPO", ]
+```
+
+############################################################
+stress genes in colon
+###########################################################
+# genelist for GSEA
+```{r }
+
+load("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/Colon/ColDxDMPs.rda")
+
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/data1/consistant_data/colon_meth_level4.rda")
+col.sig <- subset(ColDxDMPs, ColDxDMPs$P.Value<0.05)
+```
+
+```{R}
+ColDxDMPs1 <- col.sig[order(col.sig$nearestGeneSymbol, col.sig$pval),]
+ColDxDMPs1$dup <- duplicated(col.sig$nearestGeneSymbol)
+ColDxDMPs1 <- subset(col.sig, ColDxDMPs1$dup==FALSE);dim(ColDxDMPs1)
+geneRankCol <- as.data.frame(ColDxDMPs1[,c(25,28)])
+ 
+write.table(geneRankCol, file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/gsea/geneRankCol.rnk", sep = "\t")
+
+geneRankCol <- as.data.frame(cbind(col.sig$nearestGeneSymbol, -1*log(col.sig$pval,10)))
+
+write.table(geneRankCol, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/gsea/geneRankCol.rnk", sep = "\t", col.names = NA)
+```
+
+```{r}
+ann450kSub <- col_meth_level4[["ann450kSub"]]
+x <- strsplit(ann450kSub$UCSC_RefGene_Name, ";")
+n <- max(sapply(x, length))
+l <- lapply(x, function(X) c(X, rep(' ', n - length(X))))
+ann450kSub$UCSC_RefGene_Name1 <- data.frame(t(do.call(cbind, l)))[,1]
+```
+
+# Test if the stress related genes are differentially methylated
+
+```{r}
+# no of CpGs tested
+stressGenesCpg <- ann450kSub[ ann450kSub$UCSC_RefGene_Name1%in%stressGenes2,]; dim(stressGenesCpg)
+# 2108   27
+
+betas_stress <- col_meth_level4[["col_betas"]][row.names(col_meth_level4[["col_betas"]])%in%row.names(stressGenesCpg),];dim(betas_stress)
+```
+
+### hypergeometric test
+
+```{r}
+stressMethDxCol <- col.sig[row.names(col.sig)%in%row.names(stressGenesCpg),]
+dim(stressMethDxCol); 
+#[1] 71 32
+
+dim(col.sig)
+# [1] 17151    32
+
+fisher.test(matrix(c(71,2108,17151, 420257), byrow = TRUE, nrow =2, ncol =2) )
+dhyper(71, 2108, 403106, 17151)
+1-phyper(70, 2108, 403106, 17151, lower.tail = TRUE)
+
+write.csv(stressMethDxCol, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/Methyl_paper_1_2_2018/stressMethDxCol.csv")
+
+```
+
+# Load metadata and include life events survey
+
+```{r}
+metDat_c <- col_meth_level4[["metDat_c"]]; dim(metDat_c)
+
+lifeEvents <- read.csv("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/data1/raw_data/life_event_survey.csv", row.names = 1)
+lifeEvents1 <- lifeEvents[row.names(lifeEvents)%in%row.names(metDat_c),]; dim(lifeEvents1)
+
+metDat_c1 <- as.data.frame(merge (metDat_c, lifeEvents, by = "row.names", all.x = TRUE)); row.names(metDat_c1) <- metDat_c1[,1]
+metDat_c1 <- metDat_c1[row.names(metDat_c),]
+all.equal(row.names(metDat_c),row.names(metDat_c1))
+metDat_c <- metDat_c1
+rm(metDat_c1)
+metDat_c$Row.names <- NULL
+```
+
+```{r}
+betas_Col2 <- betas_stress[row.names(betas_stress)%in%row.names(stressMethDxCol),]; dim(betas_Col2)
+betas_Col2 <-  t(betas_Col2[row.names(stressMethDxCol),]); dim(betas_Col2)
+all.equal(colnames(betas_Col2), row.names(stressMethDxCol))
+
+colnames(betas_Col2) <- paste(colnames(betas_Col2),stressMethDxCol$nearestGeneSymbol, sep = "_")
+# row.names(beta.Col.stress1) <- substr(row.names((beta.Col.stress)),1,5)
+
+all.equal(row.names(metDat_c),row.names(betas_Col2))
+
+metDat_c$BH <- ifelse(metDat_c$BH_Colon_Exam=="C",1,ifelse(metDat_c$BH_Colon_Exam=="D",2,ifelse(metDat_c$BH_Colon_Exam=="M",6,4)))
+
+data1<-as.data.frame(cbind(betas_Col2,metDat_c[,-c(1,3,22,23,24,26,28)])); dim(data1)
+data1.ibs <- subset(data1, data1$Group==2)
+data1.ibs$Group<- NULL
+data1.hc <- subset(data1, data1$Group==1)
+data1.hc$Group <-  NULL
+data1$Group <-  NULL
+```
+
+# Correlation IBS  and HC together
+
+```{r}
+library(Hmisc)
+cor1       <- rcorr(as.matrix(data1), type="spearman")
+datCor     <- cor1$r; dim(datCor)
+datP       <- as.data.frame(cor1$P); dim(datP)
+corInt     <- datP[1:71,72:95]
+adjPvalues <- as.data.frame(apply(corInt,2,p.adjust))
+intCorDf   <- adjPvalues[which(adjPvalues<0.1, arr.ind = TRUE),]; dim(intCorDf )
+intCorDf1  <- intCorDf[as.vector(which(rowSums(intCorDf)<23.1)),as.vector(which(colSums(intCorDf)<33.1))]
+# ACE no significance
+# VSI no significance
+# intCorDf2  <- intCorDf1[ c(2:6,8:12,25), c(1,2,4,5,7)]
+intCorDf2  <- intCorDf1[c(1,9,12,17), c(4,5,9)]
+clinDatInt <- data1[,colnames(data1)%in%colnames(intCorDf2)]; dim(clinDatInt)
+geneDatInt <- data1[,colnames(data1)%in%row.names(intCorDf2)]; dim(geneDatInt)
+data2 <- cbind(geneDatInt,clinDatInt)
+colnames(data2)[6] <- "PHQ_15"
+
+```
+
+```{r, message = FALSE, echo=FALSE}
+library(mixOmics)
+color<-color.jet
+par(mfrow = c(1,2));
+png("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/Methyl_paper_1_2_2018/mixOmics_stress_genes_Col_sig.png", height=1700, width=1700, res=300)
+stress_pheno <- imgCor(geneDatInt,clinDatInt, X.var.names = TRUE,
+                       Y.var.names = TRUE,
+                       sideColors = TRUE,
+                       interactive.dev = TRUE,
+                        # main = TRUE,
+                       row.cex= 1.0, col.cex=1.0)
+# color,symkey, keysize,
+# xlab, ylab, margins, lhei, lwid)
+dev.off()
+```
+
+```{r}
+data2$Group <- as.factor(metDat_c$Group)
+setwd("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/Methyl_paper_1_2_2018/Col_plots/"); 
+for (i in 1:4) { 
+  for (j in 5:7)
+    local( {
+      y <- data2[, i]
+      x <- data2[, j]
+      g <- ggplot(data2, aes(x=x, y=y)) + geom_point(aes(color = data2$Group)) + geom_smooth(method = "lm", se = FALSE)+ labs(x = colnames(data2)[j], y = colnames(data2)[i]) +  theme(axis.text=element_text(size=11))+ theme(legend.position="none") #+ geom_text(aes(label = paste(" p = ", pvalueformatted), x =1.5, y = max(y, na.rm = TRUE)+ (max(y, na.rm = TRUE))/5) ,  na.rm=TRUE)
+  print(i)
+    ggsave(g, file = paste(colnames(data2)[i],paste(colnames(data2)[j], ".png", sep = ""),sep = "_"), height =  3, width = 3, units = "in")
+    })
+}
+```
+```{r}
+# install.packages("corrplot")
+# data2$Neg_Events_Count <- NULL
+# data2$cg13504245_NTRK2 <- NULL
+library(corrplot)
+library(RColorBrewer)
+source("http://www.sthda.com/upload/rquery_cormat.r")
+# data2$Bloating <- as.numeric(as.character(data2$Bloating))
+# data2$ETI_General_Score <- as.numeric(as.character(data2$ETI_General_Score))
+data2$Group <- NULL
+M <-cor(data2, method = 'spearman', use = "pairwise.complete.obs")
+corrplot(M, type="upper", order="hclust",tl.cex=0.8,
+         col=brewer.pal(n=8, name="RdYlBu"))
+```
+
+# add important genes such as glucocorticoid and current life stress
+
+```{r}
+data2$cg10847032_NR3C1  <- data1$cg10847032_NR3C1
+data2$IBS_Severity      <- data1$IBSSS_Severity
+data2$Neg_Events_Count  <- data1$Neg_Events_Count
+data2$Neg_Events_Impact <- data1$Neg_Events_Impact
+data2$Total_Impact      <- data1$Total_Impact
+data2$cg13504245_NTRK2  <- data1$cg13504245_NTRK2
+data2$cg18595639_H6PD   <- data1$cg18595639_H6PD
+data2 <-  data2[,c(1:6,12,17:18,7:11,13:16)]
+```
+
+
+
+

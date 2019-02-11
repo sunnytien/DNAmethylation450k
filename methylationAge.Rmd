@@ -1,0 +1,298 @@
+---
+title: "methylationAge"
+author: "Swapna Mahurkar-Joshi"
+date: "August 8, 2017"
+output: html_document
+---
+
+```{r setup}
+# Set working directory outside the chunks
+knitr::opts_knit$set(root.dir = normalizePath("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/"))
+```
+
+# minfi estimate composition of blood cells
+```{r}
+library(minfi)
+library(wateRmelon)
+load("temp/functional_norm/methBioconductorWorkflow/GRsetPbmcColFunFlt.Rda")
+betaVals_p <- getBeta(GRsetPbmcFunFlt)
+pred_age <- agep(betaVals_p, coeff=NULL, verbose=FALSE)
+age_df <- cbind(as.data.frame(pData(GRsetPbmcFunFlt))$Age, as.data.frame(pData(GRsetPbmcFunFlt))$Dx)
+colnames(age_df) <- c("Age","Dx")
+row.names(age_df) <- row.names(pData(GRsetPbmcFunFlt))
+age_df <- as.data.frame(age_df)
+age_df$Predicted_age <- pred_age
+
+save(age_df, file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationAge/age_df_pbmc.rda")
+```
+
+```{r}
+load("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationAge/age_df_pbmc.rda")
+
+age_df$Age <- as.numeric(as.character(age_df$Age))
+age_df$Predicted_age <- as.numeric(as.character(age_df$Predicted_age))
+age_df_ibs <- age_df[age_df$Dx=="IBS",]
+age_df_hc <- age_df[age_df$Dx=="HC",]
+
+library(ggplot2)
+p <- ggplot(age_df, aes(x=Age, y=Predicted_age, color = Dx)) + geom_point() +  geom_smooth(method=lm) #+ geom_text(aes(label=row.names(age_df)),hjust=0, vjust=0)           # Add a loess smoothed fit curve with confidence region
+#> `geom_smooth()` using method = 'loess'
+ggsave(p , file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationAge/all_ageVspredAgePbmc.png")
+
+png("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationAge/cor.age.ibs.pbmc.png")
+ggplot(age_df_ibs, aes(x=Age, y=Predicted_age)) +  geom_point() + geom_smooth(method=lm)            
+dev.off()
+
+png("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationAge/cor.age.hc.pbmc.png")
+ggplot(age_df_hc, aes(x=Age, y=Predicted_age)) +
+    geom_point() +    geom_smooth(method=lm)            
+dev.off()
+```
+
+```{r}
+m1 <- lm(Predicted_age ~ Age * Dx, data = age_df); summary(m1)
+m1.null <- lm(Predicted_age ~ Age + Dx, data = age_df)
+anova(m1.null, m1)
+```
+
+
+
+```{r}
+m1 <- lm(Predicted_age ~ Age , data = age_df_ibs)
+m2 <- lm(Predicted_age ~ Age , data = age_df_hc)
+coef(m1)
+coef(m2)
+summary(m1)
+summary(m2)
+```
+# subtypes based on methylation age
+```{r}
+m1 <- lm(Predicted_age ~ Age , data = age_df_ibs)
+plot(Predicted_age ~ Age, data = age_df_ibs); abline(m1)
+resi <- resid(m1)
+#below the fit:
+sum(resi < 0)
+#above the fit:
+sum(resi > 0)
+
+age_df_ibs$MethAgeClu <- ifelse(resi > 0 , "MethOld","MethYoung")
+metDat_p<- read.csv("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/data/rawdata/Metadata_pbmc_methylation.csv", row.names = 1)
+row.names(age_df_ibs) <- substr(row.names(age_df_ibs),1,5)
+metDat_p.ibs <- metDat_p[row.names(metDat_p)%in%row.names(age_df_ibs),]; dim(metDat_p.ibs)
+metDat_p.ibs <- metDat_p.ibs[row.names(age_df_ibs),]
+match(row.names(age_df_ibs), row.names(metDat_p.ibs))
+
+metDat_p.ibs$MethAgeClu <- age_df_ibs$MethAgeClu
+
+
+fisher.test(metDat_p.ibs$BH_Blood_Collection, metDat_p.ibs$MethAgeClu)
+# Fisher's Exact Test for Count Data
+# 
+# data:  metDat_p.ibs$BH_Blood_Collection and metDat_p.ibs$MethAgeClu
+# p-value = 0.3889
+# alternative hypothesis: two.sided
+metDat_p.ibs1 <- metDat_p.ibs[,c(5:21,25,27,29)]
+
+save(metDat_p.ibs1, file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationAge/metDat_p.ibs1,rda")
+
+```
+# plotting variables on regression line
+```{r}
+
+metDat_p.ibs2 <- metDat_p.ibs1 
+metDat_p.ibs2$Age <- age_df_ibs$Age
+metDat_p.ibs2$Predicted_age <- age_df_ibs$Predicted_age
+
+p <- ggplot(metDat_p.ibs2, aes(x=Age, y=Predicted_age)) + geom_point(aes(color = metDat_p.ibs2$MethAgeClu) ) +  geom_smooth(method=lm) #+ geom_text(aes(label=row.names(age_df)),hjust=0, vjust=0)           # Add a loess smoothed fit curve with confidence region
+#> `geom_smooth()` using method = 'loess'
+ggsave(p , file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationAge/all_ageVspredAgePbmc.png")
+
+```
+
+```{r}
+load("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationAge/metDat_p.ibs1,rda")
+library(gridExtra) 
+library(ggplot2)
+library(cowplot)
+
+for (i in 1:(ncol(metDat_p.ibs1)-1))  local({
+  y <- metDat_p.ibs1[, i]
+  test <- t.test(y ~ metDat_p.ibs1$MethAgeClu)
+  pvalue <- test$p.value
+  pvalueformatted <- format(pvalue, digits=3, nsmall=1.5)
+  g <- ggplot(metDat_p.ibs1, aes(x=metDat_p.ibs1$MethAgeClu, y=y))    + geom_boxplot(outlier.color = NA) + geom_jitter() + labs(x = "Methylation age category", y = colnames(metDat_p.ibs1)[i]) +  geom_text(aes(label = paste(" p = ", pvalueformatted), x =1.5, y = max(y, na.rm = TRUE)+ (max(y, na.rm = TRUE))/5) ,  na.rm=TRUE)
+  print(i)
+  print(g)
+  assign(colnames(metDat_p.ibs1)[i], g, pos =1) #generate an object for each plot
+     })
+# paste(eval(noquote(colnames(metDat_p.ibs1))),collapse = ","), ncol = 4)
+
+ggsave("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationAge/pbmc_methAge_clu_boxplots1.png",width = 9, height = 9,dpi = 240, units = "in",
+plot_grid(BMI,BSQ_OverallSx,BSQ_AbdPain,BSQ_Bloating,BSQ_UsualSeverity,ETI_General_Score,ETI_Physical_Score,ETI_Emotional_Score,ETI_Sexual_Score,ETI_Total_Score, ncol = 3))
+
+ggsave("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationAge/pbmc_methAge_clu_boxplots2.png",width = 9, height = 9,dpi = 250, units = "in",
+plot_grid(ACE_Score,VSI_Score,PSS_Score,PHQ_Score,PHQ_Score_noIBSQs,PHQ_Score_noGIQs,IBSSS_Severity,HAD_Anxiety,HAD_Depression, ncol = 3))
+
+# ggsave(grid.arrange(boxplot1(metDat_p.ibs1$MethAgeClu, metDat_p.ibs1$BMI, metDat_p.ibs1), boxplot1(metDat_p.ibs1$MethAgeClu, metDat_p.ibs1$BSQ_OverallSx,metDat_p.ibs1), boxplot1(metDat_p.ibs1$MethAgeClu, metDat_p.ibs1$BSQ_AbdPain, metDat_p.ibs1), boxplot1(metDat_p.ibs1$MethAgeClu, metDat_p.ibs1$BSQ_Bloating, metDat_p.ibs1), boxplot1(metDat_p.ibs1$MethAgeClu, metDat_p.ibs1$BSQ_UsualSeverity, metDat_p.ibs1), boxplot1(metDat_p.ibs1$MethAgeClu, metDat_p.ibs1$ETI_General_Score,metDat_p.ibs1),boxplot1(metDat_p.ibs1$MethAgeClu, metDat_p.ibs1$ETI_Physical_Score,metDat_p.ibs1), boxplot1(metDat_p.ibs1$MethAgeClu, metDat_p.ibs1$ETI_Emotional_Score,metDat_p.ibs1), boxplot1(metDat_p.ibs1$MethAgeClu, metDat_p.ibs1$ETI_Sexual_Score,metDat_p.ibs1), boxplot1(metDat_p.ibs1$MethAgeClu, metDat_p.ibs1$ETI_Total_Score,metDat_p.ibs1), boxplot1(metDat_p.ibs1$MethAgeClu, metDat_p.ibs1$ACE_Score,metDat_p.ibs1), boxplot1(metDat_p.ibs1$MethAgeClu, metDat_p.ibs1$VSI_Score,metDat_p.ibs1), boxplot1(metDat_p.ibs1$MethAgeClu, metDat_p.ibs1$PSS_Score, metDat_p.ibs1), boxplot1(metDat_p.ibs1$MethAgeClu, metDat_p.ibs1$PHQ_Score,metDat_p.ibs1),boxplot1(metDat_p.ibs1$MethAgeClu, metDat_p.ibs1$PHQ_Score_noIBSQs,metDat_p.ibs1), boxplot1(metDat_p.ibs1$MethAgeClu, metDat_p.ibs1$PHQ_Score_noGIQs,metDat_p.ibs1), boxplot1(metDat_p.ibs1$MethAgeClu, metDat_p.ibs1$IBSSS_Severity,metDat_p.ibs1), boxplot1(metDat_p.ibs1$MethAgeClu, metDat_p.ibs1$HAD_Anxiety,metDat_p.ibs1), boxplot1(metDat_p.ibs1$MethAgeClu, metDat_p.ibs1$HAD_Depression, metDat_p.ibs1), ncol = 4), file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationAge/PBMC_methCluster_Clinical_boxplots.png")
+
+library(gtools)
+library(knitr)
+metDat_p.ibs1[,1:19] <- apply(metDat_p.ibs1[,1:19],2,as.numeric)
+df_ttest_P <- matrix(NA, nrow = 19, ncol = 3)
+row.names(df_ttest_P) <- colnames(metDat_p.ibs1)[1:19]
+colnames(df_ttest_P) <- c("pvalue","F_statistic","FoldChange")
+df_ttest_P [,1] <- apply(metDat_p.ibs1[,1:19],2,function(x) t.test( x ~ metDat_p.ibs1$MethAgeClu)$p.value) 
+df_ttest_P [,2] <- apply(metDat_p.ibs1[,1:19],2,function(x) t.test(x ~ metDat_p.ibs1$MethAgeClu) $statistic)
+df_ttest_P [,3] <- foldchange(colMeans(subset(metDat_p.ibs1, metDat_p.ibs1$MethAgeClu=="MethOld")[,1:19],na.rm = TRUE),colMeans(subset(metDat_p.ibs1, metDat_p.ibs1$MethAgeClu=="MethYoung")[,1:19],na.rm = TRUE))
+
+round(df_ttest_P,3)
+kable(df_ttest_P, format = "html",caption = "Association of Methylation Age with Clinical Features")
+```
+
+##############################################################################################################
+## COLON
+##############################################################################################################
+
+```{r setup}
+# Set working directory outside the chunks
+knitr::opts_knit$set(root.dir = normalizePath("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/"))
+```
+
+# minfi estimate composition of blood cells
+```{r}
+library(minfi)
+library(wateRmelon)
+load("temp/functional_norm/methBioconductorWorkflow/GRsetPbmcColFunFlt.Rda")
+betaVals_c <- getBeta(GRsetColFunFlt)
+pred_age <- agep(betaVals_c, coeff=NULL, verbose=FALSE)
+age_df <- cbind(as.data.frame(pData(GRsetColFunFlt))$Age, as.data.frame(pData(GRsetColFunFlt))$Dx)
+colnames(age_df) <- c("Age","Dx")
+row.names(age_df) <- row.names(pData(GRsetColFunFlt))
+age_df <- as.data.frame(age_df)
+age_df$Predicted_age <- pred_age
+
+save(age_df, file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationAge/age_df_Col.rda")
+```
+
+```{r}
+load("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationAge/age_df_Col.rda")
+
+age_df$Age <- as.numeric(as.character(age_df$Age))
+age_df$Predicted_age <- as.numeric(as.character(age_df$Predicted_age))
+age_df_ibs <- age_df[age_df$Dx=="IBS",]
+age_df_hc <- age_df[age_df$Dx=="HC",]
+
+library(ggplot2)
+p <- ggplot(age_df, aes(x=Age, y=Predicted_age, color = Dx)) + geom_point() +  geom_smooth(method=lm) #+ geom_text(aes(label=row.names(age_df)),hjust=0, vjust=0)           # Add a loess smoothed fit curve with confidence region
+#> `geom_smooth()` using method = 'loess'
+ggsave(p , file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationAge/all_ageVspredAgeCol.png")
+
+png("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationAge/cor.age.ibs.Col.png")
+ggplot(age_df_ibs, aes(x=Age, y=Predicted_age)) +  geom_point() + geom_smooth(method=lm)            
+dev.off()
+
+png("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationAge/cor.age.hc.Col.png")
+ggplot(age_df_hc, aes(x=Age, y=Predicted_age)) +
+    geom_point() +    geom_smooth(method=lm)            
+dev.off()
+```
+
+```{r}
+m1 <- lm(Predicted_age ~ Age * Dx, data = age_df); summary(m1)
+m1.null <- lm(Predicted_age ~ Age + Dx, data = age_df)
+anova(m1.null, m1)
+```
+
+
+
+```{r}
+m1 <- lm(Predicted_age ~ Age , data = age_df_ibs)
+m2 <- lm(Predicted_age ~ Age , data = age_df_hc)
+coef(m1)
+coef(m2)
+summary(m1)
+summary(m2)
+```
+# subtypes based on methylation age
+```{r}
+m1 <- lm(Predicted_age ~ Age , data = age_df_ibs)
+plot(Predicted_age ~ Age, data = age_df_ibs); abline(m1)
+resi <- resid(m1)
+#below the fit:
+sum(resi < 0)
+#above the fit:
+sum(resi > 0)
+
+age_df_ibs$MethAgeClu <- ifelse(resi > 0 , "MethOld","MethYoung")
+metDat_c<- read.csv("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/data/rawdata/Metadata_colon_methylation.csv", row.names = 1)
+row.names(age_df_ibs) <- substr(row.names(age_df_ibs),1,5)
+metDat_c.ibs <- metDat_c[row.names(metDat_c)%in%row.names(age_df_ibs),]; dim(metDat_c.ibs)
+metDat_c.ibs <- metDat_c.ibs[row.names(age_df_ibs),]
+match(row.names(age_df_ibs), row.names(metDat_c.ibs))
+
+metDat_c.ibs$MethAgeClu <- age_df_ibs$MethAgeClu
+
+fisher.test(metDat_c.ibs$BH_Colon_Exam, metDat_c.ibs$MethAgeClu)
+# Fisher's Exact Test for Count Data
+# 
+# data:  metDat_c.ibs$BH_Colon_Exam and metDat_c.ibs$MethAgeClu
+# p-value = 0.6962
+# alternative hypothesis: two.sided
+
+metDat_c.ibs1 <- metDat_c.ibs[,c(5:21,25,27,29)]
+
+save(metDat_c.ibs1, file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationAge/metDat_c.ibs1,rda")
+
+```
+# plotting variables on regression line
+```{r}
+
+metDat_c.ibs2 <- metDat_c.ibs1 
+metDat_c.ibs2$Age <- age_df_ibs$Age
+metDat_c.ibs2$Predicted_age <- age_df_ibs$Predicted_age
+
+p <- ggplot(metDat_c.ibs2, aes(x=Age, y=Predicted_age)) + geom_point(aes(color = metDat_c.ibs2$MethAgeClu) ) +  geom_smooth(method=lm) #+ geom_text(aes(label=row.names(age_df)),hjust=0, vjust=0)           # Add a loess smoothed fit curve with confidence region
+#> `geom_smooth()` using method = 'loess'
+ggsave(p , file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationAge/all_ageVspredAgeCol.png")
+
+```
+
+```{r}
+load("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationAge/metDat_c.ibs1,rda")
+library(gridExtra) 
+library(ggplot2)
+library(cowplot)
+
+for (i in 1:(ncol(metDat_c.ibs1)-1))  local({
+  y <- metDat_c.ibs1[, i]
+  test <- t.test(y ~ metDat_c.ibs1$MethAgeClu)
+  pvalue <- test$p.value
+  pvalueformatted <- format(pvalue, digits=3, nsmall=1.5)
+  g <- ggplot(metDat_c.ibs1, aes(x=metDat_c.ibs1$MethAgeClu, y=y))    + geom_boxplot(outlier.color = NA) + geom_jitter() + labs(x = "Methylation age category", y = colnames(metDat_c.ibs1)[i]) +  geom_text(aes(label = paste(" p = ", pvalueformatted), x =1.5, y = max(y, na.rm = TRUE)+ (max(y, na.rm = TRUE))/5) ,  na.rm=TRUE)
+  print(i)
+  print(g)
+  assign(colnames(metDat_c.ibs1)[i], g, pos =1) #generate an object for each plot
+     })
+# paste(eval(noquote(colnames(metDat_c.ibs1))),collapse = ","), ncol = 4)
+
+ggsave("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationAge/Col_methAge_clu_boxplots1.png",width = 9, height = 9,dpi = 240, units = "in",
+plot_grid(BMI,BSQ_OverallSx,BSQ_AbdPain,BSQ_Bloating,BSQ_UsualSeverity,ETI_General_Score,ETI_Physical_Score,ETI_Emotional_Score,ETI_Sexual_Score,ETI_Total_Score, ncol = 3))
+
+ggsave("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationAge/Col_methAge_clu_boxplots2.png",width = 9, height = 9,dpi = 250, units = "in",
+plot_grid(ACE_Score,VSI_Score,PSS_Score,PHQ_Score,PHQ_Score_noIBSQs,PHQ_Score_noGIQs,IBSSS_Severity,HAD_Anxiety,HAD_Depression, ncol = 3))
+
+# ggsave(grid.arrange(boxplot1(metDat_c.ibs1$MethAgeClu, metDat_c.ibs1$BMI, metDat_c.ibs1), boxplot1(metDat_c.ibs1$MethAgeClu, metDat_c.ibs1$BSQ_OverallSx,metDat_c.ibs1), boxplot1(metDat_c.ibs1$MethAgeClu, metDat_c.ibs1$BSQ_AbdPain, metDat_c.ibs1), boxplot1(metDat_c.ibs1$MethAgeClu, metDat_c.ibs1$BSQ_Bloating, metDat_c.ibs1), boxplot1(metDat_c.ibs1$MethAgeClu, metDat_c.ibs1$BSQ_UsualSeverity, metDat_c.ibs1), boxplot1(metDat_c.ibs1$MethAgeClu, metDat_c.ibs1$ETI_General_Score,metDat_c.ibs1),boxplot1(metDat_c.ibs1$MethAgeClu, metDat_c.ibs1$ETI_chysical_Score,metDat_c.ibs1), boxplot1(metDat_c.ibs1$MethAgeClu, metDat_c.ibs1$ETI_Emotional_Score,metDat_c.ibs1), boxplot1(metDat_c.ibs1$MethAgeClu, metDat_c.ibs1$ETI_Sexual_Score,metDat_c.ibs1), boxplot1(metDat_c.ibs1$MethAgeClu, metDat_c.ibs1$ETI_Total_Score,metDat_c.ibs1), boxplot1(metDat_c.ibs1$MethAgeClu, metDat_c.ibs1$ACE_Score,metDat_c.ibs1), boxplot1(metDat_c.ibs1$MethAgeClu, metDat_c.ibs1$VSI_Score,metDat_c.ibs1), boxplot1(metDat_c.ibs1$MethAgeClu, metDat_c.ibs1$PSS_Score, metDat_c.ibs1), boxplot1(metDat_c.ibs1$MethAgeClu, metDat_c.ibs1$PHQ_Score,metDat_c.ibs1),boxplot1(metDat_c.ibs1$MethAgeClu, metDat_c.ibs1$PHQ_Score_noIBSQs,metDat_c.ibs1), boxplot1(metDat_c.ibs1$MethAgeClu, metDat_c.ibs1$PHQ_Score_noGIQs,metDat_c.ibs1), boxplot1(metDat_c.ibs1$MethAgeClu, metDat_c.ibs1$IBSSS_Severity,metDat_c.ibs1), boxplot1(metDat_c.ibs1$MethAgeClu, metDat_c.ibs1$HAD_Anxiety,metDat_c.ibs1), boxplot1(metDat_c.ibs1$MethAgeClu, metDat_c.ibs1$HAD_Depression, metDat_c.ibs1), ncol = 4), file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationAge/Col_methCluster_Clinical_boxplots.png")
+
+library(gtools)
+library(knitr)
+metDat_c.ibs1[,1:19] <- apply(metDat_c.ibs1[,1:19],2,as.numeric)
+df_ttest_C <- matrix(NA, nrow = 19, ncol = 3)
+row.names(df_ttest_C) <- colnames(metDat_c.ibs1)[1:19]
+colnames(df_ttest_C) <- c("pvalue","F_statistic","FoldChange")
+df_ttest_C [,1] <- apply(metDat_c.ibs1[,1:19],2,function(x) t.test( x ~ metDat_c.ibs1$MethAgeClu)$p.value) 
+df_ttest_C [,2] <- apply(metDat_c.ibs1[,1:19],2,function(x) t.test(x ~ metDat_c.ibs1$MethAgeClu) $statistic)
+df_ttest_C [,3] <- foldchange(colMeans(subset(metDat_c.ibs1, metDat_c.ibs1$MethAgeClu=="MethOld")[,1:19],na.rm = TRUE),colMeans(subset(metDat_c.ibs1, metDat_c.ibs1$MethAgeClu=="MethYoung")[,1:19],na.rm = TRUE))
+
+round(df_ttest_C,3)
+kable(df_ttest_C, format = "html",caption = "Association of Methylation Age with Clinical Features")
+```

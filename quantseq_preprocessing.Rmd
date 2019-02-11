@@ -1,0 +1,37 @@
+---
+title: "quantseq_preprocessing"
+author: "Swapna Mahurkar-Joshi"
+date: "December 1, 2017"
+output: html_document
+---
+
+# Import data
+```{r}
+# Read filenames
+files1 <- list.files("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/QuantSeq_RNAseq/Data/Bluebee_subDir", pattern = "read_counts.txt", recursive = TRUE)
+
+# Create file paths
+files2 <- paste("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/QuantSeq_RNAseq/Data/Bluebee_subDir",files1, sep = "/")
+
+# read files
+read.sample <- function(sample.name) {
+        file.name <- "read_counts.txt"
+        result <- read.delim(sample.name, header = FALSE, col.names=c("gene", "count"), sep="\t", colClasses=c("character", "numeric"))
+}
+sample.1 <- read.sample(files2[1])
+sample.2 <- read.sample(files2[2])
+
+# Let's make sure the first and second samples have the same number of rows and the same genes in each row
+nrow(sample.1) == nrow(sample.2)
+all(sample.1$gene == sample.2$gene)
+
+allSamples<- list()
+fileList <- lapply(files2,read.sample)
+r.df <- as.data.frame(fileList)
+row.names(r.df) <- r.df[,1]
+even_indexes<-seq(2,384,2)
+#We now have a data frame with all the data in it:
+allDat <- r.df[,even_indexes]
+colnames(allDat) <- gsub(".fastq.gz", "" , matrix(unlist(strsplit(files1,"/")), ncol = 2, byrow = TRUE)[,1])
+save(allDat, file = "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/QuantSeq_RNAseq/Data/rnaQuantseqAllExpr.rda")
+```

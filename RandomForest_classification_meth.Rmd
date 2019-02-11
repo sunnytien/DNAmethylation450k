@@ -1,0 +1,121 @@
+---
+title: "RandomForest_classification_meth"
+author: "Swapna Mahurkar-Joshi"
+date: "September 22, 2017"
+output: html_document
+---
+
+# Libraries
+```{r}
+library(randomForest)
+```
+
+# Load data 
+```{r}
+load(  "C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/sigBetasDxFunct.Rda")
+metDat_c<- read.csv("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/data/rawdata/Metadata_colon_methylation.csv", row.names = 1); metDat_c<- metDat_c[,-c(139,140,141)]# remove rpt
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/betasFunctionalNorm.Rda")
+beta.funnorm.col <- beta.funnorm.col[,-c(139,140,141)] # remove rpt
+colnames(beta.funnorm.col) <- substr(colnames(beta.funnorm.col), 1,5)
+metDat_c <- metDat_c[colnames(beta.funnorm.col),]
+beta.c <- t(beta.funnorm.col)
+beta.c <- beta.c[,colnames(beta.c)%in%row.names(col.sig)]
+df1 <- cbind(beta.c[row.names(beta.c)%in% row.names(subset(metDat_c, metDat_c$Group==2)),],subset(metDat_c, metDat_c$Group==2)$BSQ_OverallSx)
+
+
+```
+
+```{r}
+set.seed(2210)
+colnames(df1)[18502] <- "BSQ_OverallSx"
+df1 <- as.matrix(df1)
+df1 <- na.omit(df1)
+p_meth.rf <- randomForest(df1[,-18502], df1[,18502], importance=TRUE, proximity=TRUE)
+print(p_meth.rf)
+## Look at variable importance:
+round(importance(p_meth.rf), 2)
+plot(p_meth.rf)
+# Variable Importance Plot
+varImpPlot(p_meth.rf,
+           sort = T,
+           main="Variable Importance",
+           n.var=10)
+
+
+## Do MDS on 1 - proximity:
+c_meth.mds <- cmdscale(1 - p_meth.rf$proximity, eig=TRUE)
+op <- par(pty="s")
+pairs(cbind(df1[,-c(18502,18503)], p_meth.mds$points), cex=0.6, gap=0,
+      col=c("red", "green", "blue")[as.numeric(p_meth.mds$BSQ_OverallSx)],
+      main="Colon IBS methylation data: Predictors and MDS of Proximity Based on RandomForest")
+par(op)
+print(iris.mds$GOF)
+
+
+```
+
+```{r}
+
+p_meth.rf$importance[order(-p_meth.rf$importance[,1]),][1:10,]
+              # %IncMSE IncNodePurity
+# cg05728656 0.25617964     27.624259
+# cg07466531 0.15564980     27.367701
+# cg05290489 0.15478565     22.608350
+# cg04153116 0.13775149     18.355895
+# cg22945824 0.10666522     12.878730
+# cg08307816 0.09996422     20.858308
+# cg10498900 0.09440849      9.522343
+# cg09922871 0.07999923     10.715812
+# cg23755113 0.07236119     10.036298
+# cg10032110 0.05880242      7.047157
+# Predicting response variable
+rf.imp.col <- col.sig[row.names(col.sig)%in%row.names(p_meth.rf$importance[order(-p_meth.rf$importance[,1]),][1:10,]),]
+
+
+df1 <- as.data.frame(df1)
+df1$predicted.response <- predict(p_meth.rf ,df1)
+RMSE(df1$predicted.response, df1$BSQ_OverallSx)
+```
+
+```{r}
+
+library(e1071)
+library(caret)
+## Loading required package: lattice
+## Loading required package: ggplot2
+# Create Confusion Matrix
+pred_df <- data.frame(dep_var = df1$predicted.response, severity = df1$BSQ_OverallSx)
+confusionMatrix(pred_df, cutoff = 0.2)
+
+confusionMatrix(data.frame(score = df1$predicted.response,
+                dep_var=df1$BSQ_OverallSx),  cutoff = 0.5)
+
+table(factor(pred, levels=min(test):max(test)), factor(test, levels=min(test):max(test)))
+## Confusion Matrix and Statistics
+## 
+##           Reference
+## Prediction    no   yes
+##        no  21816    42
+##        yes     0  2767
+##                                           
+##                Accuracy : 0.9983          
+##                  95% CI : (0.9977, 0.9988)
+##     No Information Rate : 0.8859          
+##     P-Value [Acc > NIR] : < 2.2e-16
+
+col.sig[row.names(col.sig)%in%'cg22945824',]
+```
+
+```{r}
+
+X = df1[-c(18502)]
+y = df1[,18502]
+
+train_x, test_x, train_y, test_y = train_test_split(X, y, test_size=0.2)
+
+model = RandomForestRegressor(n_estimators=20, max_depth=4, n_jobs=-1)
+model.fit(train_x, train_y)
+print 'Train MAE: {}'.format(mean_absolute_error(train_y, model.predict(train_x)))
+print 'Test MAE: {}'.format(mean_absolute_error(test_y, model.predict(test_x)))
+```
+

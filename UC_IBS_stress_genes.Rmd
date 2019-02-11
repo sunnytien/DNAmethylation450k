@@ -1,0 +1,229 @@
+---
+title: "UC_IBS_stress_genes"
+author: "Swapna Mahurkar-Joshi"
+date: "October 10, 2017"
+output: html_document
+---
+# Relevant project information
+```{r}
+
+1. 
+# Series GSE42921 		Query DataSets for GSE42921
+# Status 	Public on Jan 01, 2015
+# Title 	DNA methylation in a validation cohort of colon mucosa samples from individuals with Crohns' disease or ulcerative colitis and normal controls
+# Organism 	Homo sapiens
+# Experiment type 	Methylation profiling by genome tiling array
+# Summary 	Genome wide DNA methylation profiling of Crohn's disease, ulcerative colitis, and normal colon mucosa samples. The Illumina Infinium HumanMethylation450 BeadChip v1.1 was used to obtain DNA methylation profiles across 482,421 CpGs in colon mucosa samples. Samples came from 5 Crohn's disease affected, 5 ulcerative colitis affected, and 12 normal individuals. One ulcerative colitis sample was assayed before and after treatment with infliximab and mesalamine.
+#   	
+2.
+# Series GSE32146 		Query DataSets for GSE32146
+# Status 	Public on Jun 01, 2013
+# Title 	DNA methylation in a discovery cohort of colon mucosa samples from individuals with Crohns' disease or ulcerative colitis and normal controls
+# Organism 	Homo sapiens
+# Experiment type 	Methylation profiling by genome tiling array
+# Summary 	Genome wide DNA methylation profiling of Crohn's disease, ulcerative colitis, and normal colon mucosa samples. The Illumina Infinium HumanMethylation450 BeadChip v1.1 was used to obtain DNA methylation profiles across 482,421 CpGs in colon mucosa samples. Samples came from 10 Crohn's disease affected, 4 ulcerative colitis affected, and 10 normal individuals. One ulcerative colitis sample was assayed before and after treatment with 6-mercaptopurine and mesalamine.
+#   	
+# Overall design 	Bisulfite converted DNA from the 25 samples were hybridized to the Illumina Infinium HumanMethylation450 BeadChip v1.1
+  	
+```
+# libraries
+```{r}
+library(limma)
+```
+
+# Import Data
+```{r}
+# ##### pediatric.. not very useful.
+GSE32146 <- read.csv("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/carrerDevMeth/rawData/GSE32146_matrix_processed_colonMucosa.csv", row.names = 1)
+GSE32146_pheno <- read.csv("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/carrerDevMeth/rawData/GSE32146_pheno.csv")
+GSE42921 <- read.delim("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/carrerDevMeth/rawData/GSE42921_RKMTIB_Norm_and_non-Norm_FinalReport.txt", skip = 5, sep = "\t", row.names = 1)
+####### GSE27899 (https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE27899; https://www.ncbi.nlm.nih.gov/pubmed/22826509)
+
+GSE27899 <- read.delim("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/carrerDevMeth/rawData/GSE27899_Illumina_raw_data_sj_avgBeta.txt", sep = "\t",row.names = 1)
+colnames(GSE27899)[3:22] <- substr(colnames(GSE27899)[3:22],2,15)
+GSE27899_pheno <- read.csv("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/carrerDevMeth/rawData/GSE27899_pheno.csv", row.names = 1)
+
+```
+
+```{r}
+hpa <- c("ADCYAP1R1","NR3C1","FKBP4","FKBP5","BDNF", "NR3C2","HTR2C","BDNF","HTR1B","CRHR1","CRHR2","CRHBP","BDNF-AS","CNR1")
+
+hpaCpgs <- c("cg02435252","cg04111177","cg11580341","cg13846563","cg22680139","cg20954537","cg12637106","cg18757974","cg02947993","cg10288772","cg00862618","cg01316109","cg26623411","cg11845071")
+
+load("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/hm450annotations.rda")
+md <- GSE27899[,3:22]
+an1 <- hm450annotations[row.names(hm450annotations)%in%hpaCpgs,]
+an1.c<- subset(an1, an1$Relation_to_Island=="Island")
+
+md.stress.uc <- md[row.names(md)%in% row.names(an1),]; dim(md.stress.uc)
+GSE27899_pheno <- GSE27899_pheno[colnames(md),]
+  m <- beta.logit(md)
+  mn <- m[row.names(m)%in%row.names(md.stress.uc),]
+  design <- model.matrix(~0+GSE27899_pheno$Group, data=GSE27899_pheno)
+  colnames(design) <- c("HC","UC")
+  fit <- lmFit(mn, design)
+  contMatrix <- makeContrasts("UC-HC", levels = design)
+  print(contMatrix)
+  fit2 <- contrasts.fit(fit, contMatrix)
+  fit2 <- eBayes(fit2)
+  dmps <- topTable(fit2, num=Inf, coef=1)
+  b <- md.stress.uc
+  d <- b[row.names(b)%in%row.names(dmps),]
+  d <- d[row.names(dmps),]
+  pheno1 <- as.data.frame(GSE27899_pheno)
+  md <- rowMeans(d[,colnames(d)%in%row.names(subset(pheno1, Group ==  levels(as.factor(pheno1$Group))[2]))]) - rowMeans(d[,colnames
+(d)%in%row.names(subset(pheno1, Group ==  levels(as.factor(pheno1$Group))[1]))])
+  dmps$meanDiff <- md
+
+# 
+# a <- hm450annotations[row.names(hm450annotations)%in%row.names(dmps),]
+a <- an1.c[row.names(dmps),]
+
+dmps.an <- cbind(dmps,a)
+sigDMPs <- dmps.an[1:14,]
+
+
+```
+
+```{r}
+colnames(GRsetColFunFlt) <- pData(GRsetColFunFlt)$NDP
+beta.col.stress <- t(getBeta(GRsetColFunFlt)[row.names(getBeta(GRsetColFunFlt)) %in% row.names(sigDMPs),]); dim(beta.col.stress)
+# [1] 138 13
+beta.col.stress1 <- as.data.frame(beta.col.stress[,colnames(beta.col.stress)%in%row.names(sigDMPs)])
+df2 <- sigDMPs[row.names(sigDMPs)%in%colnames(beta.col.stress1 ),]
+df2 <- as.data.frame(df2[colnames(beta.col.stress1),])
+match(colnames(beta.col.stress1), row.names(df2))
+
+colnames(beta.col.stress1) <- df2$nearestGeneSymbol
+# row.names(beta.col.stress1) <- substr(row.names((beta.col.stress)),1,5)
+
+metDat_c<- read.csv("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/data/rawdata/Metadata_colon_methylation.csv", row.names = 1)
+metDat_c <- metDat_c[row.names(metDat_c)%in%row.names(beta.col.stress1),]
+metDat_c <- metDat_c[row.names(beta.col.stress1),]
+match(row.names(metDat_c),row.names(beta.col.stress1))
+metDat_c$BH <- ifelse(metDat_c$BH_Colon_Exam=="C",1,ifelse(metDat_c$BH_Colon_Exam=="D",2,ifelse(metDat_c$BH_Colon_Exam=="M",6,4)))
+# beta.col.stress1 <- beta.col.stress[,colMeans(beta.col.stress)>0.05]; dim(beta.col.stress1)
+
+data1<-as.data.frame(cbind(beta.col.stress1,metDat_c[,-c(1,22,23,24,26,28,29)])); dim(data1)
+
+save(metDat_c, file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/data/technicallyCorrectData/clinMethColon.rda")
+save(metDat_p, file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/data/technicallyCorrectData/clinMethPbmc.rda")
+library(Hmisc)
+
+cor1 <- rcorr(as.matrix(data1), type="spearman")
+# data1.ibs <- subset(data1, data1$Group == 2)
+# data1.hc <- subset(data1, data1$Group == 1)
+cor1 <- rcorr(as.matrix(data1), type="spearman")
+datCor<-round(cor1$r, 2); dim(datCor)
+datP<-cor1$P; dim(datP)
+# df_1 <- as.data.frame(ifelse(datP<0.005,1,0))[1:275,280:298]
+# df_1$sum1 <- apply(df_1,1,sum, na.rm = TRUE)
+# df2 <- subset(df_1, df_1$sum1>0)
+# beta.col.stress2 <- beta.col.stress1[,colnames(beta.col.stress1)%in%row.names(df2)]
+# dim(beta.col.stress2)
+#  dim(beta.col.stress1)
+# [1] 138 256
+# z <- apply(corMatP_1, 2, function(x) {x<0.05})
+# corMatP_2 <- apply(corMatP_1, 1, function(x){x<0.05})
+# corMatP_2[grep("TRUE",corMatP_2[1,]),]
+
+library(mixOmics)
+color<-color.jet
+
+colnames(metDat_c)[-c(1,2,3,22,23,24,26,28,29)] <- c("Age", "BMI","OverallSx","AbdPain" ,"Bloating","UsualSeverity", "ETI General",   "ETI Physical",  "ETI Emotional", "ETI Sexual",    "ETI Total",     "ACE Score","VSI Score",   "PSS Score"  ,"PHQ Score",          
+"PHQ noIBSQ",   "PHQ noGIQ",    "IBSSS score", "Anxiety",  "Depression")
+
+
+par(mfrow = c(1,2));
+png("C:/Users/swapnajoshi-admin/Documents/GIT_workspace/IBSdnaMethylationProject/DNA_methylation_R21_Analysis/temp/functional_norm/mixOmics_stress_genes_HPA1.png", height=1800, width=1800, res=330)
+stress_pheno <- imgCor(beta.col.stress1,metDat_c[,-c(1,2,3,22,23,24,26,28,29)], X.var.names = TRUE,
+                       Y.var.names = TRUE,
+                       sideColors = TRUE,
+                       interactive.dev = TRUE,
+                        # main = TRUE,
+                       row.cex= 1.0, col.cex=1.0)
+# color,symkey, keysize,
+# xlab, ylab, margins, lhei, lwid)
+dev.off()
+
+colnames(beta.col.stress1) [c(2,7,11)]<- c("NR3C2_2","ADCYAP1R1_2","FKBP4_2")
+beta.col.stress3 <- cbind(beta.col.stress1, metDat_c[,-c(1,2,3,22,23,24,26,28,29)])
+
+
+setwd("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/colon/HPAaxisPlots/"); for (i in 1:12) {
+  for (j in 13:32)
+    local( {
+  y <- beta.col.stress3[, i]
+  x <- beta.col.stress3[, j]
+  test <- cor.test(y , x)
+  pvalue <- test$p.value
+  pvalueformatted <- format(pvalue, digits=3, nsmall=1.5)
+  g <- ggplot(beta.col.stress3, aes(x=x, y=y))    + geom_point() + geom_smooth(method = "lm")+ labs(x = colnames(beta.col.stress3)[j], y = colnames(beta.col.stress3)[i]) +  geom_text(aes(label = paste(" p = ", pvalueformatted), x =1.5, y = max(y, na.rm = TRUE)+ (max(y, na.rm = TRUE))/5) ,  na.rm=TRUE)
+  print(i)
+  
+  ggsave(g, file = paste(colnames(beta.col.stress3)[i],paste(colnames(beta.col.stress3)[j], ".png", sep = ""),sep = "_"))
+
+  assign(paste(colnames(beta.col.stress3)[i],colnames(beta.col.stress3)[j],sep = "_"), g, pos =1) #generate an object for each plot
+  }
+    )}
+
+# comb1 <- expand.grid(names(beta.col.stress3[,c(1:13)]),names(beta.col.stress3[,c(14:33)]))
+# paste(comb1[,1],comb1[,2], sep = "_")
+# ggsave("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/methylationSubgroups/colon/plots/clinical_stressGenes.png",width = 9, height = 8,dpi = 210, units = "in",plot_grid(Age,BMI,BSQ_OverallSx,BSQ_AbdPain,BSQ_Bloating,BSQ_UsualSeverity,ETI_General_Score,ETI_Physical_Score,ETI_Emotional_Score,ETI_Sexual_Score,ETI_Total_Score,ACE_Score,VSI_Score,PSS_Score,PHQ_Score,PHQ_Score_noIBSQs,PHQ_Score_noGIQs,IBSSS_Severity,HAD_Anxiety,HAD_Depression, ncol = 5))
+
+beta.col.stress3$Group <- data1$Group
+
+setwd("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/colon/plots/impPlots/"
+      ); for (i in 1:13) {
+  local( {
+  y <- beta.col.stress3[, i]
+  x <- beta.col.stress3[, 28]
+  g <- ggplot(beta.col.stress3, aes(x=x, y=y))  + geom_point(aes(color = beta.col.stress3$Group),show.legend = FALSE) + geom_smooth(method = "lm") + labs(x = colnames(beta.col.stress3)[28], y = colnames(beta.col.stress3)[i]) 
+  print(i)
+    ggsave(g, file = paste(colnames(beta.col.stress3)[i],paste(colnames(beta.col.stress3)[28], ".png", sep = ""),sep = "_"), height = 4, width = 4)
+  assign(paste(colnames(beta.col.stress3)[i],colnames(beta.col.stress3)[28],sep = "_"), g, pos =1) #generate an object for each plot
+  }
+    )}
+
+  # test <- cor.test(y , x)
+  # pvalue <- test$p.value
+  # pvalueformatted <- format(pvalue, digits=3, nsmall=1.5)
+  ggsave(qplot(data1[,18], data1[,1]) + geom_point(aes(color=factor(data1$Group)))  + geom_smooth(method="lm")+ labs(x = "Abdominal Pain", y = "NR3C2 Methylation")+guides(colour=FALSE), file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/colon/HPAaxisPlots/impPlots/NR3C2_AbdPain.png", height = 4, width = 4, units = "in")
+
+   ggsave(qplot(data1[,28], data1[,1]) + geom_point(aes(color=factor(data1$Group)))  + geom_smooth(method="lm")+ labs(x = "PSS Score", y = "NR3C2 Methylation")+guides(colour=FALSE), file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/colon/HPAaxisPlots/impPlots/NR3C2_PSS Score.png", height = 4, width = 4, units = "in")
+
+    ggsave(qplot(data1[,33], data1[,1]) + geom_point(aes(color=factor(data1$Group)))  + geom_smooth(method="lm")+ labs(x = "Anxiety", y = "NR3C2 Methylation")+guides(colour=FALSE), file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/colon/HPAaxisPlots/impPlots/NR3C2_Anxiety.png", height = 4, width = 4, units = "in")
+
+    ggsave(qplot(data1[,27], data1[,7]) + geom_point(aes(color=factor(data1$Group)))  + geom_smooth(method="lm")+ labs(x = "VSI", y = "ADCYAP1R1 Methylation")+guides(colour=FALSE), file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/colon/HPAaxisPlots/impPlots/ADCYAP1R1_2_VSI.png", height = 4, width = 4, units = "in")
+  
+      
+    ggsave(qplot(data1[,26], data1[,11]) + geom_point(aes(color=factor(data1$Group)))  + geom_smooth(method="lm")+ labs(x = "ACE Score", y = "FKBP4 Methylation") + guides(colour=FALSE), file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/colon/HPAaxisPlots/impPlots/FKBP4_2_ACE Score.png", height = 4, width = 4, units = "in")
+  
+
+
+    ggsave(qplot(data1[,34], data1[,12]) + geom_point(aes(color=factor(data1$Group)))  + geom_smooth(method="lm")+ labs(x = "Depression", y = "CRHR1 Methylation") + guides(colour=FALSE), file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/colon/HPAaxisPlots/impPlots/CRHR1_Depression.png", height = 4, width = 4, units = "in")
+    
+        ggsave(qplot(data1[,29], data1[,10]) + geom_point(aes(color=factor(data1$Group)))  + geom_smooth(method="lm")+ labs(x = "PHQ Score", y = "FKBP4 Methylation") + guides(colour=FALSE), file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/colon/HPAaxisPlots/impPlots/FKBP4_PHQ Score.png", height = 4, width = 4, units = "in")
+  
+        
+        ggsave(qplot(data1[,29], data1[,4]) + geom_point(aes(color=factor(data1$Group)))  + geom_smooth(method="lm")+ labs(x = "PHQ Score", y = "FKBP5 Methylation") + guides(colour=FALSE), file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/colon/HPAaxisPlots/impPlots/FKBP5_PHQ Score.png", height = 4, width = 4, units = "in")
+        
+        
+        ggsave(qplot(data1[,27], data1[,4]) + geom_point(aes(color=factor(data1$Group)))  + geom_smooth(method="lm")+ labs(x = "VSI Score", y = "FKBP5 Methylation") + guides(colour=FALSE), file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/colon/HPAaxisPlots/impPlots/FKBP5_VSI Score.png", height = 4, width = 4, units = "in")
+        
+        
+          ggsave(qplot(data1[,35], data1[,5]) + geom_point(aes(color=factor(data1$Group)))  + geom_smooth(method="lm")+ labs(x = "Depression", y = "FKBP5 Methylation") + guides(colour=FALSE)+    theme_bw() +
+
+  #eliminates background, gridlines, and chart border
+  theme(
+    plot.background = element_blank()
+   ,panel.grid.major = element_blank()
+   ,panel.grid.minor = element_blank()
+   ,panel.border = element_blank()
+  ) +
+
+  #draws x and y axis line
+  theme(axis.line = element_line(color = 'black')), file= "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/methBioconductorWorkflow/colon/HPAaxisPlots/impPlots/FKBP5_Depression.png", height = 4, width = 4, units = "in")
+```
+
+

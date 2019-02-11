@@ -1,0 +1,512 @@
+---
+title: "Untitled"
+author: "Swapna Mahurkar-Joshi"
+date: "October 26, 2017"
+output: html_document
+---
+
+Extra from WGCNA
+
+```{r}
+#####################################################################################
+
+
+
+# cluser samples check for outliers
+
+```{r Chunk 3}
+sampleTree = hclust(dist(datExpr0), method = "average");
+
+# sizeGrWindow(12,9)
+png("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/wgcna/plots/clusetringToDetectOutliers.png", width = 2000, height =1800, res = 200)
+# par(cex = 0.6);
+# par(mar = c(0,4,2,0))
+plot(sampleTree, cex.axis = 1.5, cex.main = 2,
+main = "Sample clustering to detect outliers",
+cex.lab = 1.)
+dev.off()
+
+# Leave all the samples in
+labels = cutreeStatic(sampleTree, cutHeight = 18)
+keep = (labels==1)
+datExpr <- datExpr0[keep, ]; dim(datExpr)
+
+sampleTree = hclust(dist(datExpr), method = "average");
+png("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/wgcna/plots/sampleClusteringNoOutlier.png", width = 2000, height = 1800, res = 200)
+# par(cex = 0.6);
+# par(mar = c(0,4,2,0))
+plot(sampleTree, cex.axis = 1.5, cex.main = 2,
+main = "Sample clustering to detect outliers",
+cex.lab = 1.)
+dev.off()
+
+```
+
+# Load clinical data
+
+```{r Chunk 4, message=FALSE }
+datTraits <- read.csv("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/functional_norm/Metadata_colon_methylation.csv", row.names = 1); dim(datTraits)
+# datTraits.IBS <- subset(datTraits, datTraits$Group==2); dim(datTraits.IBS)
+datExpr1 <- datExpr[row.names(datExpr)%in%row.names(datTraits),]; dim(datExpr1)
+datTraits1 <- datTraits[row.names(datTraits)%in%row.names(datExpr1),];
+datTraits1 <- datTraits1[row.names(datExpr1),];dim(datTraits1)
+datTraits <- datTraits1[,c(1:21,25,27)]; dim(datTraits)
+datTraits <- as.data.frame(datTraits)
+datExpr <-datExpr1
+match(row.names(datTraits), row.names(datExpr1))
+collectGarbage()
+
+datTraits$BH_Colon_Exam_num <-  ifelse(datTraits$BH_Colon_Exam=="C",1,ifelse(datTraits$BH_Colon_Exam=="D",2,ifelse(datTraits$BH_Colon_Exam=="M",6,ifelse(datTraits$BH_Colon_Exam=="U",6,4))))
+datTraits$BH_Colon_Exam <- NULL
+
+datTraits1 <- datTraits
+datTraits[,23] <- as.numeric(as.character(datTraits[,23]))
+datTraits <- apply(datTraits,2,as.numeric)
+row.names(datTraits) <- row.names(datTraits1)
+colnames(datTraits) <- colnames(datTraits1)
+datTraits <- as.data.frame(datTraits)
+save(datTraits, file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/wgcna/datTraits.col.rda")
+
+match(row.names(datTraits),row.names(datExpr))
+collectGarbage()
+rm(list = c("datExpr0","datTraits1", "datExpr1"))
+```
+
+```{r}
+sampleTree2 = hclust(dist(datExpr), method = "average")
+traitColors = numbers2colors(datTraits, signed = FALSE,
+naColor="grey")
+datTraits <- as.data.frame(datTraits)
+lab1 <- ifelse(datTraits$Group==1,"HC", "IBS")
+png("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/wgcna/plots/heirarchical_clustering_col.png", height = 3000, width = 3200, res=200)
+plotDendroAndColors(sampleTree2, traitColors,groupLabels = names(datTraits),dendroLabels = lab1, cex.dendroLabels = 0.8, main = "Sample dendrogram, trait heatmap")
+dev.off()
+save(datExpr, datTraits, file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/wgcna/IBS-01-dataInput-colon.RData")
+
+```
+# Choosing soft thresholding power β
+```{r}
+disableWGCNAThreads()
+powers = c(c(1:10), seq(from = 12, to=20, by=2))
+sft = pickSoftThreshold(datExpr, powerVector = powers,
+verbose = 5)
+
+save(sft , file = "C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/wgcna/sft_power12.rda")
+```
+
+
+```{r}
+# sizeGrWindow(9, 5)
+png("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/wgcna/plots/soft_power_col.png", height = 3000, width = 3200, res=200)
+par(mfrow = c(1,2))
+cex1 = 0.9
+plot(sft$fitIndices[,1],
+-sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+xlab="Soft Threshold (power)",
+ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+main = paste("Scale independence"));
+text(sft$fitIndices[,1],
+-sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+labels=powers,cex=cex1,col="red");
+# this line corresponds to using an R^2 cut-off of h
+abline(h=0.872,col="red")
+dev.off()
+```
+
+```{r}
+# sizeGrWindow(9, 5)
+png("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/wgcna/plots/power_connectivity_colon.png", height = 3000, width = 3200, res=200)
+par(mfrow = c(1,2))
+cex1 = 0.9;
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+xlab="Soft Threshold (power)",
+ylab="Mean Connectivity", type="n",
+main = paste("Mean connectivity"))
+text(sft$fitIndices[,1], sft$fitIndices[,5],
+labels=powers, cex=cex1,col="red")
+dev.off()
+```
+
+```{r}
+net = blockwiseModules(datExpr, power = 4,
+TOMType = "unsigned",
+minModuleSize = 30,
+reassignThreshold = 0,
+mergeCutHeight = 0.25,
+numericLabels = TRUE,
+pamRespectsDendro = FALSE,
+saveTOMs = TRUE,
+saveTOMFileBase="IBS_TOM",
+verbose = 3)
+```
+
+```{r}
+png("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/wgcna/plots/heirarchical_colors.png", height = 3000, width = 3200, res=200)
+plotDendroAndColors(net$dendrograms[[1]],
+net$blockGenes[[1]],
+"Module colors",
+dendroLabels = FALSE, hang = 0.03,
+addGuide = TRUE, guideHang = 0.05)
+dev.off()
+```
+
+
+```{r}
+moduleLabels = net$colors
+moduleColors = labels2colors(net$colors)
+MEs = net$MEs;
+geneTree = net$dendrograms[[1]];
+save(MEs, moduleLabels, moduleColors, geneTree,
+file="C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/wgcna/IBS-02-networkConstruction-auto-col.RData")
+```
+
+```{r}
+# Define numbers of genes and samples
+nGenes = ncol(datExpr);
+nSamples = nrow(datExpr);
+# Recalculate MEs with color labels
+MEs0 = moduleEigengenes(datExpr, moduleColors)$eigengenes
+MEs = orderMEs(MEs0)
+moduleTraitCor = cor(MEs, datTraits, use = "p");
+moduleTraitPvalue = corPvalueStudent(moduleTraitCor, nSamples)
+```
+
+```{r}
+datTraits <- as.data.frame(datTraits)
+textMatrix =  paste(signif(moduleTraitCor, 2), "\n(",signif(moduleTraitPvalue,
+1), ")", sep = "");
+dim(textMatrix) = dim(moduleTraitCor)
+png("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/wgcna/plots/moduleTraitRelationship_col.png", height = 2200, width = 2500, res= 200)
+par(mar = c(6, 8.5, 3, 3));
+labeledHeatmap(Matrix = moduleTraitCor,
+xLabels = names(datTraits),
+yLabels = names(MEs),
+ySymbols = names(MEs),
+colorLabels = FALSE,
+colors = blueWhiteRed(50),
+textMatrix = textMatrix,
+setStdMargins = FALSE,
+cex.text = 0.6,
+zlim = c(-1,1),
+main = paste("Module-trait relationships in colon"))
+dev.off()
+```
+# Identify important modules
+```{r}
+moduleTraitCor1 <- as.data.frame(moduleTraitCor)
+m1 <- moduleTraitCor1[apply(moduleTraitCor1, MARGIN = 1, function(x) any(x < -0.16 | x>0.16)), ]
+m2 <- m1[ ,apply(m1, MARGIN = 2, function(x) any(x < -0.16 | x>0.16))]
+
+moduleTraitPvalue1 <- as.data.frame(moduleTraitPvalue)
+p1 <- moduleTraitPvalue1[apply(moduleTraitPvalue1, MARGIN = 1, function(x) any(x < 0.05)), ]
+p2 <- p1[ ,apply(p1, MARGIN = 2, function(x) any(x < 0.05))]
+
+m2 <- moduleTraitCor1[row.names(moduleTraitCor1)%in%row.names(p2), colnames(moduleTraitCor1)%in%colnames(p2)]
+
+textMatrix1 =  paste(m2, "\n(",p2,")", sep = "");
+
+png("C:/Users/swapnajoshi-admin/Box Sync/DNA_methylation_R21_Analysis/temp/wgcna/plots/moduleTraitRelationship_col_sigOnly.png", height = 2200, width = 2500, res= 200)
+par(mar = c(6, 8.5, 3, 3));
+labeledHeatmap(Matrix = m2,
+xLabels = colnames(m2),
+yLabels = row.names(m2),
+ySymbols = row.names(m2),
+colorLabels = FALSE,
+colors = blueWhiteRed(50),
+textMatrix = textMatrix1,
+setStdMargins = FALSE,
+cex.text = 0.9,
+zlim = c(-1,1),
+main = paste("Significant Module-trait relationships in colon"))
+dev.off()
+
+# Yellow = BSQ_AbdPain
+# black = BSQ_OverallSx
+# turqoise = ACE
+# brown = ACE
+
+```
+
+```{r}
+# Module of interest:  yellow; trait = BSQ_AbdPain
+# Define variable abd pain containing column of datTrait
+pain = as.data.frame(datTraits$BSQ_AbdPain);
+names(pain) = "AbdominalPain"
+modNames = substring(names(MEs), 3)
+geneModuleMembership = as.data.frame(cor(datExpr, MEs, use = "p"));
+MMPvalue = as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership), nSamples));
+names(geneModuleMembership) = paste("MM", modNames, sep="");
+names(MMPvalue) = paste("p.MM", modNames, sep="");
+geneTraitSignificance = as.data.frame(cor(datExpr, pain, use = "p"));
+GSPvalue = as.data.frame(corPvalueStudent(as.matrix(geneTraitSignificance), nSamples));
+names(geneTraitSignificance) = paste("GS.", names(pain), sep="");
+names(GSPvalue) = paste("p.GS.", names(pain), sep="");
+
+
+# Identify genes with high GS and MM
+module = "yellow"
+column = match(module, modNames);
+moduleGenes = moduleColors==module;
+# sizeGrWindow(7, 7);
+png("wgcna/plots/AbdominalPain_yellow_colon.png", height = 2000, width = 2500, res= 200)
+par(mfrow = c(1,1));
+verboseScatterplot(
+abs(geneModuleMembership[moduleGenes,
+column]),
+abs(geneTraitSignificance[moduleGenes, 1]),
+xlab = paste("Module Membership in",module,"module"),
+ylab = "Gene significance for abdominal pain",
+main = paste("Module membership vs. gene significance\n"),
+cex.main = 1.2, cex.lab = 1.2,
+cex.axis = 1.2, col = module)
+dev.off()
+
+# cpg sites in yellow module
+load("hm450annotations.rda")
+
+hm450annotationsYellow <- hm450annotations[row.names(hm450annotations)%in%row.names(MMPvalue[moduleGenes,]),]
+write.csv(hm450annotationsYellow, file = "wgcna/abdominalPainYellowAnnotaionsColon.csv")
+
+hm450annotations <- as.data.frame(hm450annotations)
+geneInfo0 = data.frame(Probes = colnames(datExpr),
+geneSymbol =hm450annotations[row.names(hm450annotations)%in%colnames(datExpr), 37],
+RelationToIsland = hm450annotations[row.names(hm450annotations)%in%colnames(datExpr), 19],
+moduleColor = moduleColors,
+geneTraitSignificance,
+GSPvalue)
+
+# Order modules by their significance for weight
+modOrder = order(-abs(cor(MEs, pain, use = "p")));
+# Add module membership information in the chosen order
+for (mod in 1:ncol(geneModuleMembership))
+{
+oldNames = names(geneInfo0)
+geneInfo0 = data.frame(geneInfo0, geneModuleMembership[, modOrder[mod]],
+MMPvalue[, modOrder[mod]]);
+names(geneInfo0) = c(oldNames, paste("MM.", modNames[modOrder[mod]], sep=""),
+paste("p.MM.", modNames[modOrder[mod]], sep=""))
+}
+# Order the genes in the geneInfo variable first by module color, then by geneTraitSignificance
+geneOrder = order(geneInfo0$moduleColor, -abs(geneInfo0$GS.AbdominalPain));
+geneInfo = geneInfo0[geneOrder, ]
+
+hm450annotationsyellow <- hm450annotations[row.names(hm450annotations)%in%names(datExpr)[moduleColors=="yellow"],]
+write.csv(hm450annotationsYellow, file = "wgcna/abdominalPainYellowAnnotaionsColon.csv")
+write.csv(geneInfo, file = "wgcna/geneInfo_abdominalPain.csv")
+fix(geneInfo)
+
+```
+
+```{r}
+# Module of interest:  black; trait = BSQ_OverallSx
+# Define variable  containing column of datTrait
+severity = as.data.frame(datTraits$BSQ_OverallSx);
+names(severity) = "OverallSeverity"
+modNames = substring(names(MEs), 3)
+geneModuleMembership = as.data.frame(cor(datExpr, MEs, use = "p"));
+MMPvalue = as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership), nSamples));
+names(geneModuleMembership) = paste("MM", modNames, sep="");
+names(MMPvalue) = paste("p.MM", modNames, sep="");
+geneTraitSignificance = as.data.frame(cor(datExpr,  severity, use = "p"));
+GSPvalue = as.data.frame(corPvalueStudent(as.matrix(geneTraitSignificance), nSamples));
+names(geneTraitSignificance) = paste("GS.", names(severity), sep="");
+names(GSPvalue) = paste("p.GS.", names(severity), sep="");
+
+# Identify genes with high GS and MM
+
+module = "black"
+column = match(module, modNames);
+moduleGenes = moduleColors==module;
+# sizeGrWindow(7, 7);
+png("wgcna/plots/overallSeverity_black_colon.png", height = 2000, width = 2500, res= 200)
+par(mfrow = c(1,1));
+verboseScatterplot(
+abs(geneModuleMembership[moduleGenes,
+column]),
+abs(geneTraitSignificance[moduleGenes, 1]),
+xlab = paste("Module Membership in",module,"module"),
+ylab = "Gene significance for OverallSeverity",
+main = paste("Module membership vs. gene significance\n"),
+cex.main = 1.2, cex.lab = 1.2,
+cex.axis = 1.2, col = module)
+dev.off()
+
+# cpg sites in black module
+
+datExpr <- as.data.frame(datExpr)
+hm450annotationsblack <- hm450annotations[row.names(hm450annotations)%in%names(datExpr)[moduleColors=="black"],]
+
+hm450annotations <- as.data.frame(hm450annotations)
+geneInfo0 = data.frame(Probes = colnames(datExpr),
+geneSymbol =hm450annotations[row.names(hm450annotations)%in%colnames(datExpr), 37],
+RelationToIsland = hm450annotations[row.names(hm450annotations)%in%colnames(datExpr), 19],
+moduleColor = moduleColors,
+geneTraitSignificance,
+GSPvalue)
+
+# Order modules by their significance for weight
+modOrder = order(-abs(cor(MEs, pain, use = "p")));
+# Add module membership information in the chosen order
+for (mod in 1:ncol(geneModuleMembership))
+{
+oldNames = names(geneInfo0)
+geneInfo0 = data.frame(geneInfo0, geneModuleMembership[, modOrder[mod]],
+MMPvalue[, modOrder[mod]]);
+names(geneInfo0) = c(oldNames, paste("MM.", modNames[modOrder[mod]], sep=""),
+paste("p.MM.", modNames[modOrder[mod]], sep=""))
+}
+# Order the genes in the geneInfo variable first by module color, then by geneTraitSignificance
+geneOrder = order(geneInfo0$moduleColor, -abs(geneInfo0$GS.OverallSeverity));
+geneInfo = geneInfo0[geneOrder, ]
+
+
+hm450annotationsblack <- hm450annotations[row.names(hm450annotations)%in%names(datExpr)[moduleColors=="black"],]
+
+write.csv(hm450annotationsblack, file = "wgcna/OverallSevBlackAnnotaionsColon.csv")
+write.csv(geneInfo , file = "wgcna/geneInfo_overallSeverity_black.csv")
+fix(geneInfo)
+
+
+```
+
+
+```{r}
+# Module of interest:  turqoise; trait = ACE
+# Define variable  containing column of datTrait
+ACE = as.data.frame(datTraits$ACE_Score);
+names(ACE) = "ACE"
+modNames = substring(names(MEs), 3)
+geneModuleMembership = as.data.frame(cor(datExpr, MEs, use = "p"));
+MMPvalue = as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership), nSamples));
+names(geneModuleMembership) = paste("MM", modNames, sep="");
+names(MMPvalue) = paste("p.MM", modNames, sep="");
+geneTraitSignificance = as.data.frame(cor(datExpr,  ACE, use = "p"));
+GSPvalue = as.data.frame(corPvalueStudent(as.matrix(geneTraitSignificance), nSamples));
+names(geneTraitSignificance) = paste("GS.", names(ACE), sep="");
+names(GSPvalue) = paste("p.GS.", names(ACE), sep="");
+
+# Identify genes with high GS and MM
+
+module = "turquoise"
+column = match(module, modNames);
+moduleGenes = moduleColors==module;
+# sizeGrWindow(7, 7);
+png("wgcna/plots/ACE_turquoise_colon.png", height = 2000, width = 2500, res= 200)
+# par(mfrow = c(1,1));
+verboseScatterplot(
+abs(geneModuleMembership[moduleGenes,
+column]),
+abs(geneTraitSignificance[moduleGenes, 1]),
+xlab = paste("Module Membership in",module,"module"),
+ylab = "Gene significance for ACE",
+main = paste("Module membership vs. gene significance\n"),
+cex.main = 1.2, cex.lab = 1.2,
+cex.axis = 1.2, col = module);
+dev.off()
+
+# cpg sites in black module
+
+datExpr <- as.data.frame(datExpr)
+hm450annotationsblack <- hm450annotations[row.names(hm450annotations)%in%names(datExpr)[moduleColors=="turquoise"],]
+
+hm450annotations <- as.data.frame(hm450annotations)
+geneInfo0 = data.frame(Probes = colnames(datExpr),
+geneSymbol =hm450annotations[row.names(hm450annotations)%in%colnames(datExpr), 37],
+RelationToIsland = hm450annotations[row.names(hm450annotations)%in%colnames(datExpr), 19],
+moduleColor = moduleColors,
+geneTraitSignificance,
+GSPvalue)
+
+# Order modules by their significance for weight
+modOrder = order(-abs(cor(MEs, pain, use = "p")));
+# Add module membership information in the chosen order
+for (mod in 1:ncol(geneModuleMembership))
+{
+oldNames = names(geneInfo0)
+geneInfo0 = data.frame(geneInfo0, geneModuleMembership[, modOrder[mod]],
+MMPvalue[, modOrder[mod]]);
+names(geneInfo0) = c(oldNames, paste("MM.", modNames[modOrder[mod]], sep=""),
+paste("p.MM.", modNames[modOrder[mod]], sep=""))
+}
+# Order the genes in the geneInfo variable first by module color, then by geneTraitSignificance
+geneOrder = order(geneInfo0$moduleColor, -abs(geneInfo0$GS.ACE));
+geneInfo = geneInfo0[geneOrder, ]
+
+
+hm450annotationsturquoise <- hm450annotations[row.names(hm450annotations)%in%names(datExpr)[moduleColors=="turquoise"],]
+
+write.csv(hm450annotationsturquoise, file = "wgcna/ACEturquoiseAnnotaionsColon.csv")
+write.csv(geneInfo , file = "wgcna/geneInfo_ACE_turquoise.csv")
+fix(geneInfo)
+
+
+```
+##############################################################################################
+##############################################################################################
+##############################################################################################
+
+# Install Mergeomics
+```{r}
+source("https://bioconductor.org/biocLite.R")
+biocLite("Mergeomics")
+```
+
+# Import library scripts.
+```{r}
+library(Mergeomics)
+```
+###### MSEA (Marker set enrichment analysis)  ###
+
+```{r}
+job.msea <- list()
+job.msea$label <- "hdlc"
+job.msea$folder <- "Results"
+job.msea$genfile <- system.file("extdata", 
+"genes.hdlc_040kb_ld70.human_eliminated.txt", package="Mergeomics")
+job.msea$marfile <- system.file("extdata", 
+"marker.hdlc_040kb_ld70.human_eliminated.txt", package="Mergeomics")
+job.msea$modfile <- system.file("extdata", 
+"modules.mousecoexpr.liver.human.txt", package="Mergeomics")
+job.msea$inffile <- system.file("extdata", "coexpr.info.txt", 
+package="Mergeomics")
+job.msea$nperm <- 100 ## default value is 20000 (this is recommended)
+job.msea <- ssea.start(job.msea)
+job.msea <- ssea.prepare(job.msea)
+job.msea <- ssea.control(job.msea)
+job.msea <- ssea.analyze(job.msea)
+job.msea <- ssea.finish(job.msea)
+```
+######  Create intermediary datasets for KDA ###########
+```{r}
+syms <- tool.read(system.file("extdata", "symbols.txt", 
+package="Mergeomics"))
+syms <- syms[,c("HUMAN", "MOUSE")]
+names(syms) <- c("FROM", "TO")
+
+## default and recommended rmax=0.33.
+## min.module.count is the number of the pathways to be taken from the MSEA
+## results to merge. If it is not specified (NULL), all the pathways having 
+## MSEA-FDR value less than 0.25 will be considered for merging if they are 
+## overlapping with the given ratio rmax. 
+job.kda <- ssea2kda(job.msea, rmax=0.2, symbols=syms, min.module.count=NULL) 
+```
+######   wKDA (Weighted key driver analysis)    ##########
+```{r}
+job.kda$netfile <- system.file("extdata", 
+"network.mouseliver.mouse.txt", package="Mergeomics")
+job.kda <- kda.configure(job.kda)
+job.kda <- kda.start(job.kda)
+job.kda <- kda.prepare(job.kda)
+job.kda <- kda.analyze(job.kda)
+job.kda <- kda.finish(job.kda)
+```
+######  Prepare network files for visualization   #########
+```{r}
+## Creates the input files for Cytoscape (http://www.cytoscape.org/)
+job.kda <- kda2cytoscape(job.kda)
+```
+
+
+
+```
+
